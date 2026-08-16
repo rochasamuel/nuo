@@ -1,0 +1,490 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>UNO pixel card — sombra + hover em CSS</title>
+<style>
+  :root {
+    --card-w: 120px;
+    /* Hard-edged shadow, blur 0 — keeps the pixel-art look. Bump the blur if
+       you want a softer, more "lifted" feel on hover. */
+    --shadow-rest:  drop-shadow(3px 4px 0 rgba(0,0,0,.45));
+    --shadow-hover: drop-shadow(6px 12px 0 rgba(0,0,0,.5));
+  }
+
+  body {
+    margin: 0; min-height: 100vh; display: grid; place-content: center; gap: 64px;
+    background: #14301e; color: #cfd8cf;
+    font: 14px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  h2 { font-size: 13px; font-weight: 500; opacity: .65; margin: 0 0 20px; }
+
+  /* ---- the card ------------------------------------------------------- */
+  .card {
+    width: var(--card-w);
+    height: auto;              /* SVG has no width/height, so aspect comes from viewBox */
+    display: block;
+
+    /* drop-shadow(), NOT box-shadow: the card has rounded corners and
+       transparent pixels, and box-shadow would draw a rectangle around the
+       element's border box instead of hugging the card silhouette. */
+    filter: var(--shadow-rest);
+
+    transition: transform .18s cubic-bezier(.2,.8,.3,1),
+                filter    .18s cubic-bezier(.2,.8,.3,1);
+    will-change: transform, filter;
+    cursor: pointer;
+  }
+
+  /* ---- fanned hand, cards overlapping --------------------------------- */
+  .hand { display: flex; padding-bottom: 40px; }
+  .hand .card {
+    transform-origin: bottom center;   /* viewBox == the card exactly, so this
+                                          pivot is the real bottom centre */
+    margin-right: calc(var(--card-w) * -0.55);   /* the overlap */
+  }
+  .hand .card:last-child { margin-right: 0; }
+
+  .hand .card:nth-child(1) { transform: rotate(-12deg) translateY(10px); }
+  .hand .card:nth-child(2) { transform: rotate( -6deg) translateY(2px);  }
+  .hand .card:nth-child(3) { transform: rotate(  0deg);                  }
+  .hand .card:nth-child(4) { transform: rotate(  6deg) translateY(2px);  }
+  .hand .card:nth-child(5) { transform: rotate( 12deg) translateY(10px); }
+
+  /* Lift on hover. Re-declaring rotate keeps the fan angle while adding lift. */
+  .hand .card:hover { position: relative; z-index: 10; filter: var(--shadow-hover); }
+  .hand .card:nth-child(1):hover { transform: rotate(-12deg) translateY(-26px) scale(1.08); }
+  .hand .card:nth-child(2):hover { transform: rotate( -6deg) translateY(-32px) scale(1.08); }
+  .hand .card:nth-child(3):hover { transform: rotate(  0deg) translateY(-34px) scale(1.08); }
+  .hand .card:nth-child(4):hover { transform: rotate(  6deg) translateY(-32px) scale(1.08); }
+  .hand .card:nth-child(5):hover { transform: rotate( 12deg) translateY(-26px) scale(1.08); }
+
+  /* ---- straight overlapping pile --------------------------------------- */
+  .pile { display: flex; }
+  .pile .card { margin-right: calc(var(--card-w) * -0.7); }
+  .pile .card:last-child { margin-right: 0; }
+  .pile .card:hover { position: relative; z-index: 10;
+                      transform: translateY(-14px); filter: var(--shadow-hover); }
+
+  /* ---- baralho completo ------------------------------------------------ */
+  .grid { display: grid; grid-template-columns: repeat(10, 1fr); gap: 10px;
+          --card-w: 76px; }
+  .grid-3 { grid-template-columns: repeat(3, 1fr); --card-w: 96px; }
+  .grid .card:hover { transform: translateY(-8px) scale(1.06);
+                      filter: var(--shadow-hover); }
+
+  /* ---- as pilhas -------------------------------------------------------- */
+  /* .stack, não .pile: .pile já é a demo de pilha sobreposta lá em cima. */
+  .stacks { display: flex; gap: 110px; align-items: center; justify-content: center; }
+  .stack { position: relative; width: var(--card-w); aspect-ratio: 2 / 3;
+           --card-w: 130px; }
+  .stack .card {
+    position: absolute; inset: 0; width: 100%;
+    transform: translate(var(--dx, 0), var(--dy, 0)) rotate(var(--rot, 0deg));
+  }
+
+  /* Descarte: sombra POR CARTA. É ela que separa uma carta da de baixo — sem
+     isso a pilha vira uma mancha de cartas coladas. */
+  .stack-discard .card { filter: var(--shadow-rest); }
+
+  /* Compra: UMA sombra, no contêiner. filter num pai desenha um único halo em
+     volta do alpha do conjunto todo, em vez de N halos escondidos uns sob os
+     outros — mesmo resultado visual, 1 passada de filtro em vez de 6. */
+  .stack-draw { filter: var(--shadow-rest); }
+  .stack-draw .card { filter: none; }
+
+  /* A compra é um <button>: precisa receber foco por teclado. */
+  .stack-draw { border: 0; padding: 0; background: none; cursor: pointer; }
+  .stack-draw:disabled { cursor: default; opacity: .3; }
+  .stack-draw:hover:not(:disabled),
+  .stack-draw:focus-visible { filter: var(--shadow-hover); }
+
+  /* A carta recém-descartada cai na pilha. Só o "from" — o estado final é o
+     transform que .stack .card já calcula, então não há salto no fim. */
+  @keyframes uno-dealt {
+    from {
+      transform: translate(var(--dx, 0px), calc(var(--dy, 0px) - 46px))
+                 rotate(var(--rot, 0deg)) scale(1.14);
+      opacity: 0;
+    }
+  }
+  .stack-discard .dealt { animation: uno-dealt .24s cubic-bezier(.2,.8,.3,1); }
+
+  /* ---- a simulação ------------------------------------------------------ */
+  .sim { display: grid; gap: 30px; justify-items: center; }
+  .sim-info { margin: 0; display: flex; gap: 16px; align-items: center;
+              font-size: 12px; opacity: .6; }
+  .sim-info b { font-weight: 600; opacity: .9; }
+  .sim-btn { font: inherit; color: inherit; background: none; cursor: pointer;
+             border: 1px solid currentColor; border-radius: 4px; padding: 1px 9px;
+             opacity: .7; }
+  .sim-btn:hover { opacity: 1; }
+  .sim-hint { margin: 0; font-size: 12px; opacity: .4; }
+
+  /* A mão: o leque paramétrico do §5, em vez das regras nth-child fixas que a
+     demo do topo usa. Aqui o número de cartas muda a cada compra. */
+  .sim-hand { display: flex; list-style: none; margin: 0; padding: 44px 0 0;
+              --card-w: 104px; }
+  .sim-slot { transform: rotate(var(--angle)) translateY(var(--drop));
+              transform-origin: bottom center;
+              margin-right: calc(var(--card-w) * -0.55); }
+  .sim-slot:last-child { margin-right: 0; }
+  .sim-slot:hover, .sim-slot:focus-within { position: relative; z-index: 10; }
+  .sim-slot button { display: block; padding: 0; border: 0; background: none;
+                     cursor: pointer; }
+  .sim-slot button:hover .card,
+  .sim-slot button:focus-visible .card {
+    transform: translateY(-26px) scale(1.06); filter: var(--shadow-hover);
+  }
+</style>
+
+<section>
+  <h2>mão em leque — passe o mouse</h2>
+  <div class="hand">
+    <img class="card" src="/cards/svg/uno-red-7.svg"    alt="7 vermelho">
+    <img class="card" src="/cards/svg/uno-blue-3.svg"   alt="3 azul">
+    <img class="card" src="/cards/svg/uno-yellow-0.svg" alt="0 amarelo">
+    <img class="card" src="/cards/svg/uno-green-9.svg"  alt="9 verde">
+    <img class="card" src="/cards/svg/uno-red-4.svg"    alt="4 vermelho">
+  </div>
+</section>
+
+<section>
+  <h2>pilha sobreposta — a sombra de cada carta cai sobre a de baixo</h2>
+  <div class="pile">
+    <img class="card" src="/cards/svg/uno-green-2.svg" alt="2 verde">
+    <img class="card" src="/cards/svg/uno-blue-8.svg"  alt="8 azul">
+    <img class="card" src="/cards/svg/uno-red-5.svg"   alt="5 vermelho">
+    <img class="card" src="/cards/svg/uno-yellow-6.svg" alt="6 amarelo">
+  </div>
+</section>
+
+<section>
+  <h2>cartas de ação — 12</h2>
+  <div class="grid grid-3">
+    <img class="card" src="/cards/svg/uno-red-skip.svg" alt="bloqueio vermelho">
+    <img class="card" src="/cards/svg/uno-red-reverse.svg" alt="inverte vermelho">
+    <img class="card" src="/cards/svg/uno-red-draw2.svg" alt="+2 vermelho">
+    <img class="card" src="/cards/svg/uno-yellow-skip.svg" alt="bloqueio amarelo">
+    <img class="card" src="/cards/svg/uno-yellow-reverse.svg" alt="inverte amarelo">
+    <img class="card" src="/cards/svg/uno-yellow-draw2.svg" alt="+2 amarelo">
+    <img class="card" src="/cards/svg/uno-green-skip.svg" alt="bloqueio verde">
+    <img class="card" src="/cards/svg/uno-green-reverse.svg" alt="inverte verde">
+    <img class="card" src="/cards/svg/uno-green-draw2.svg" alt="+2 verde">
+    <img class="card" src="/cards/svg/uno-blue-skip.svg" alt="bloqueio azul">
+    <img class="card" src="/cards/svg/uno-blue-reverse.svg" alt="inverte azul">
+    <img class="card" src="/cards/svg/uno-blue-draw2.svg" alt="+2 azul">
+    <img class="card" src="/cards/svg/uno-wild-change.svg" alt="coringa troca cor">
+    <img class="card" src="/cards/svg/uno-wild-draw4.svg" alt="coringa +4">
+  </div>
+</section>
+
+<section>
+  <h2>coringas — sem naipe</h2>
+  <div class="grid grid-3">
+    <img class="card" src="/cards/svg/uno-wild-change.svg" alt="coringa troca cor">
+    <img class="card" src="/cards/svg/uno-wild-draw4.svg" alt="coringa +4">
+  </div>
+</section>
+
+<section>
+  <h2>simulação — compra organizada, descarte bagunçado</h2>
+  <div class="sim">
+    <div class="stacks">
+      <button class="stack stack-draw" id="sim-draw"></button>
+      <div class="stack stack-discard" id="sim-discard"></div>
+    </div>
+    <p class="sim-info">
+      <span>compra <b id="sim-n-deck">0</b></span>
+      <span>descarte <b id="sim-n-discard">0</b></span>
+      <span>mão <b id="sim-n-hand">0</b></span>
+      <button class="sim-btn" id="sim-reset">reiniciar</button>
+    </p>
+    <p class="sim-hint">clique no monte para comprar · clique numa carta da mão para descartar</p>
+    <ul class="sim-hand" id="sim-hand"></ul>
+  </div>
+</section>
+
+<section>
+  <h2>verso — uma carta só</h2>
+  <div class="grid grid-3">
+    <img class="card" src="/cards/svg/uno-back.svg" alt="verso">
+  </div>
+</section>
+
+<section>
+  <h2>baralho completo — 54 cartas + verso</h2>
+  <div class="grid">
+    <img class="card" src="/cards/svg/uno-red-0.svg" alt="0 vermelho">
+    <img class="card" src="/cards/svg/uno-red-1.svg" alt="1 vermelho">
+    <img class="card" src="/cards/svg/uno-red-2.svg" alt="2 vermelho">
+    <img class="card" src="/cards/svg/uno-red-3.svg" alt="3 vermelho">
+    <img class="card" src="/cards/svg/uno-red-4.svg" alt="4 vermelho">
+    <img class="card" src="/cards/svg/uno-red-5.svg" alt="5 vermelho">
+    <img class="card" src="/cards/svg/uno-red-6.svg" alt="6 vermelho">
+    <img class="card" src="/cards/svg/uno-red-7.svg" alt="7 vermelho">
+    <img class="card" src="/cards/svg/uno-red-8.svg" alt="8 vermelho">
+    <img class="card" src="/cards/svg/uno-red-9.svg" alt="9 vermelho">
+    <img class="card" src="/cards/svg/uno-yellow-0.svg" alt="0 amarelo">
+    <img class="card" src="/cards/svg/uno-yellow-1.svg" alt="1 amarelo">
+    <img class="card" src="/cards/svg/uno-yellow-2.svg" alt="2 amarelo">
+    <img class="card" src="/cards/svg/uno-yellow-3.svg" alt="3 amarelo">
+    <img class="card" src="/cards/svg/uno-yellow-4.svg" alt="4 amarelo">
+    <img class="card" src="/cards/svg/uno-yellow-5.svg" alt="5 amarelo">
+    <img class="card" src="/cards/svg/uno-yellow-6.svg" alt="6 amarelo">
+    <img class="card" src="/cards/svg/uno-yellow-7.svg" alt="7 amarelo">
+    <img class="card" src="/cards/svg/uno-yellow-8.svg" alt="8 amarelo">
+    <img class="card" src="/cards/svg/uno-yellow-9.svg" alt="9 amarelo">
+    <img class="card" src="/cards/svg/uno-green-0.svg" alt="0 verde">
+    <img class="card" src="/cards/svg/uno-green-1.svg" alt="1 verde">
+    <img class="card" src="/cards/svg/uno-green-2.svg" alt="2 verde">
+    <img class="card" src="/cards/svg/uno-green-3.svg" alt="3 verde">
+    <img class="card" src="/cards/svg/uno-green-4.svg" alt="4 verde">
+    <img class="card" src="/cards/svg/uno-green-5.svg" alt="5 verde">
+    <img class="card" src="/cards/svg/uno-green-6.svg" alt="6 verde">
+    <img class="card" src="/cards/svg/uno-green-7.svg" alt="7 verde">
+    <img class="card" src="/cards/svg/uno-green-8.svg" alt="8 verde">
+    <img class="card" src="/cards/svg/uno-green-9.svg" alt="9 verde">
+    <img class="card" src="/cards/svg/uno-blue-0.svg" alt="0 azul">
+    <img class="card" src="/cards/svg/uno-blue-1.svg" alt="1 azul">
+    <img class="card" src="/cards/svg/uno-blue-2.svg" alt="2 azul">
+    <img class="card" src="/cards/svg/uno-blue-3.svg" alt="3 azul">
+    <img class="card" src="/cards/svg/uno-blue-4.svg" alt="4 azul">
+    <img class="card" src="/cards/svg/uno-blue-5.svg" alt="5 azul">
+    <img class="card" src="/cards/svg/uno-blue-6.svg" alt="6 azul">
+    <img class="card" src="/cards/svg/uno-blue-7.svg" alt="7 azul">
+    <img class="card" src="/cards/svg/uno-blue-8.svg" alt="8 azul">
+    <img class="card" src="/cards/svg/uno-blue-9.svg" alt="9 azul">
+    <img class="card" src="/cards/svg/uno-red-skip.svg" alt="bloqueio vermelho">
+    <img class="card" src="/cards/svg/uno-red-reverse.svg" alt="inverte vermelho">
+    <img class="card" src="/cards/svg/uno-red-draw2.svg" alt="+2 vermelho">
+    <img class="card" src="/cards/svg/uno-yellow-skip.svg" alt="bloqueio amarelo">
+    <img class="card" src="/cards/svg/uno-yellow-reverse.svg" alt="inverte amarelo">
+    <img class="card" src="/cards/svg/uno-yellow-draw2.svg" alt="+2 amarelo">
+    <img class="card" src="/cards/svg/uno-green-skip.svg" alt="bloqueio verde">
+    <img class="card" src="/cards/svg/uno-green-reverse.svg" alt="inverte verde">
+    <img class="card" src="/cards/svg/uno-green-draw2.svg" alt="+2 verde">
+    <img class="card" src="/cards/svg/uno-blue-skip.svg" alt="bloqueio azul">
+    <img class="card" src="/cards/svg/uno-blue-reverse.svg" alt="inverte azul">
+    <img class="card" src="/cards/svg/uno-blue-draw2.svg" alt="+2 azul">
+    <img class="card" src="/cards/svg/uno-wild-change.svg" alt="coringa troca cor">
+    <img class="card" src="/cards/svg/uno-wild-draw4.svg" alt="coringa +4">
+    <img class="card" src="/cards/svg/uno-back.svg" alt="verso">
+  </div>
+</section>
+
+<script>
+// Simulação das duas pilhas. Não é o jogo: não valida jogada, qualquer carta
+// da mão pode ir para o descarte. O que ela existe para exercitar é a mecânica
+// das pilhas do §6 — corte de profundidade, espalhamento estável, reembaralho.
+const SUITS = ['red', 'yellow', 'green', 'blue']
+const FACES = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 'skip', 'reverse', 'draw2']
+const DEPTH = 8        // cartas renderizadas no descarte; o resto só no estado
+const DRAW_MAX = 6     // versos renderizados na compra
+
+const WORD = { skip: 'bloqueio', reverse: 'inverte', draw2: '+2',
+               change: 'coringa troca cor', draw4: 'coringa +4' }
+const COLOR = { red: 'vermelho', yellow: 'amarelo', green: 'verde', blue: 'azul' }
+
+const srcOf = c => `svg/uno-${c.suit}-${c.face}.svg`
+const nameOf = c => c.suit === 'wild'
+  ? WORD[c.face]
+  : `${WORD[c.face] ?? c.face} ${COLOR[c.suit]}`
+
+// Uma de cada face: 54 cartas. O baralho de verdade tem 108, com duplicatas —
+// para exercitar as pilhas a distribuição não importa.
+function freshDeck() {
+  const d = []
+  for (const suit of SUITS) for (const face of FACES) d.push({ suit, face })
+  d.push({ suit: 'wild', face: 'change' }, { suit: 'wild', face: 'draw4' })
+  return d
+}
+
+// Fisher-Yates. Math.random() AQUI é o certo: isto é o embaralho, acontece uma
+// vez. O que não pode usar random é o espalhamento — ver scatter().
+function shuffle(a) {
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[a[i], a[j]] = [a[j], a[i]]
+  }
+  return a
+}
+
+// --- o espalhamento do descarte (§6) ---
+// Vem do índice da carta na pilha, por hash. Com Math.random() aqui a pilha
+// inteira se reembaralharia visualmente a cada render — e esta demo re-renderiza
+// tudo a cada clique, então o defeito apareceria na hora.
+function hash(n) {
+  n = Math.imul(n ^ (n >>> 15), 0x2c1b3c6d)
+  n = Math.imul(n ^ (n >>> 12), 0x297a2d39)
+  return ((n ^ (n >>> 15)) >>> 0) / 2 ** 32
+}
+function scatter(i, pileSize, isTop) {
+  const t = Math.min(1, pileSize / 24)       // o monte engorda até 24 cartas
+  const spread = isTop ? 5 : 16 + 4 * t      // graus
+  const off = (9 + 3.5 * t) / 100            // fração da largura da carta
+  return {
+    rot: (hash(i * 3 + 1) * 2 - 1) * spread,
+    dx: (hash(i * 3 + 2) * 2 - 1) * off * 100,
+    dy: (hash(i * 3 + 3) * 2 - 1) * off * 100,
+  }
+}
+
+// --- estado ---
+let deck, discard, hand, seen
+const $ = id => document.getElementById(id)
+const elByIndex = new Map()   // índice absoluto -> <img>, o "key" do §6
+
+function reset() {
+  deck = shuffle(freshDeck())
+  hand = deck.splice(-5)
+  discard = [deck.pop()]
+  seen = 0
+  elByIndex.clear()
+  $('sim-discard').replaceChildren()
+  render()
+}
+
+function reshuffle() {
+  // Regra do UNO: quando a compra acaba, o descarte volta embaralhado — menos a
+  // carta do topo, que continua valendo. Os índices reiniciam, então o cache de
+  // elementos tem que ir junto.
+  if (discard.length < 2) return
+  const top = discard.pop()
+  deck = shuffle(discard)
+  discard = [top]
+  seen = 1
+  elByIndex.clear()
+  $('sim-discard').replaceChildren()
+}
+
+function drawCard() {
+  if (!deck.length) reshuffle()
+  if (!deck.length) return
+  hand.push(deck.pop())
+  render()
+}
+
+function play(i) {
+  discard.push(hand.splice(i, 1)[0])
+  render()
+}
+
+// --- render ---
+function renderDraw() {
+  const box = $('sim-draw')
+  const n = deck.length ? Math.min(DRAW_MAX, Math.max(1, Math.ceil(deck.length / 8))) : 0
+  box.replaceChildren()
+  for (let k = 0; k < n; k++) {
+    const d = (n - 1 - k) * 2
+    const img = new Image()
+    img.className = 'card'
+    img.src = 'svg/uno-back.svg'
+    img.alt = ''
+    img.style.setProperty('--dx', `${-d}px`)
+    img.style.setProperty('--dy', `${-d}px`)
+    box.append(img)
+  }
+  box.disabled = !deck.length && discard.length < 2
+  box.setAttribute('aria-label', deck.length
+    ? `Comprar carta — ${deck.length} na pilha`
+    : 'Compra vazia — clique para reembaralhar o descarte')
+}
+
+function renderDiscard() {
+  const box = $('sim-discard')
+  const shown = discard.slice(-DEPTH)
+  const base = discard.length - shown.length
+  const live = new Set()
+
+  shown.forEach((c, k) => {
+    const i = base + k                    // índice na pilha INTEIRA, não na fatia
+    const isTop = k === shown.length - 1
+    live.add(i)
+
+    let img = elByIndex.get(i)
+    const isNew = !img
+    if (isNew) {
+      img = new Image()
+      elByIndex.set(i, img)
+      box.append(img)
+    }
+    img.src = srcOf(c)
+    img.alt = isTop ? nameOf(c) : ''      // só o topo é anunciado; o resto é enfeite
+    img.className = 'card' + (isNew && i >= seen ? ' dealt' : '')
+
+    // Recalculado a cada render, de propósito: o espalhamento cresce com o
+    // tamanho da pilha, e a carta que deixa de ser topo sai de ±5° para ±16°.
+    // A transition que .card já tem faz ela se acomodar na bagunça em vez de
+    // saltar — é o efeito que se vê ao descartar duas seguidas.
+    const s = scatter(i, discard.length, isTop)
+    img.style.setProperty('--rot', `${s.rot}deg`)
+    img.style.setProperty('--dx', `${s.dx}%`)
+    img.style.setProperty('--dy', `${s.dy}%`)
+  })
+
+  for (const [i, el] of elByIndex) {
+    if (!live.has(i)) { el.remove(); elByIndex.delete(i) }
+  }
+  seen = discard.length
+}
+
+function renderHand() {
+  const box = $('sim-hand')
+  box.replaceChildren()
+  const mid = (hand.length - 1) / 2
+  hand.forEach((c, i) => {
+    const off = i - mid
+    const t = mid === 0 ? 0 : off / mid    // -1 … 1
+    const li = document.createElement('li')
+    li.className = 'sim-slot'
+    li.style.setProperty('--angle', `${off * 6}deg`)
+    li.style.setProperty('--drop', `${t * t * 10}px`)   // parábola: 0 no centro
+
+    const b = document.createElement('button')
+    b.title = `descartar ${nameOf(c)}`
+    b.addEventListener('click', () => play(i))
+    const img = new Image()
+    img.className = 'card'
+    img.src = srcOf(c)
+    img.alt = nameOf(c)
+    b.append(img)
+    li.append(b)
+    box.append(li)
+  })
+}
+
+function render() {
+  renderDraw()
+  renderDiscard()
+  renderHand()
+  $('sim-n-deck').textContent = deck.length
+  $('sim-n-discard').textContent = discard.length
+  $('sim-n-hand').textContent = hand.length
+}
+
+$('sim-draw').addEventListener('click', drawCard)
+$('sim-reset').addEventListener('click', reset)
+reset()
+</script>
+
+<!--
+  NOTAS
+
+  1. Se aparecerem costuras finas entre as cores durante a rotação, troque
+     shape-rendering="crispEdges" por "geometricPrecision" no SVG. crispEdges
+     mantém o pixel duro (melhor parado / em escala inteira); geometricPrecision
+     suaviza as bordas (melhor girando).
+
+  2. Para trocar a cor do naipe via CSS, o SVG precisa estar INLINE no HTML —
+     com <img> as classes internas não são alcançáveis. Inline, funciona assim:
+        svg.blue .u-body-0 { fill: #3E7FD4; }
+        svg.blue .u-rim    { fill: #12386E; }
+     As classes disponíveis: u-frame, u-frame-hi, u-frame-shade, u-rim,
+     u-body-0..5, u-oval-0..1, u-gloss, u-ink, u-paper, u-paper-mid,
+     u-paper-shade.
+
+     Só no verso: u-oval-2 (nas frentes essa cor é idêntica a u-body-0 e some
+     dentro dela) e u-mark / u-mark-hi / u-mark-shade, que são o "UNO".
+
+  3. filter cria stacking context próprio. z-index no :hover continua valendo
+     dentro do flex pai, que é o que a mão em leque precisa.
+-->

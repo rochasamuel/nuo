@@ -1,0 +1,250 @@
+import { useEffect, useRef, useState } from "react";
+import { isWild, type Card, type PlayColor, type TableState } from "@uno/shared";
+import type { RoomActions } from "../game/useRoomConnection";
+import { flyPlay, handCardPose, markLeaving, type Pose } from "../game/flights";
+import { artUrl, COLOR_HEX, COLOR_LABEL, scatter } from "../lib/cards";
+import { useSound } from "../lib/sound";
+import { useUi } from "../store/ui";
+import { DiscardPile } from "./DiscardPile";
+import { DrawPile } from "./DrawPile";
+import { Hand } from "./Hand";
+import { PlayerSeat } from "./PlayerSeat";
+import { SystemLog } from "./SystemLog";
+import { WildPicker } from "./WildPicker";
+
+type Props = {
+  state: TableState;
+  sessionId: string;
+  hand: Card[];
+  playableIds: Set<string>;
+  actions: RoomActions;
+};
+
+export function Table({ state, sessionId, hand, playableIds, actions }: Props) {
+  const discardRef = useRef<HTMLDivElement>(null);
+  const [dropArmed, setDropArmed] = useState(false);
+  const [pendingWild, setPendingWild] = useState<string | null>(null);
+  const soundEnabled = useUi((ui) => ui.soundEnabled);
+  const toggleSound = useUi((ui) => ui.toggleSound);
+
+  useTableSounds(state, sessionId, hand.length);
+
+  const yourTurn = state.currentPlayerId === sessionId && state.phase === "playing";
+  const seats = seatOrder(state, sessionId);
+  const current = state.players.find((player) => player.id === state.currentPlayerId);
+  const me = state.players.find((player) => player.id === sessionId);
+  const canCallUno = state.phase === "playing" && hand.length === 1 && !me?.calledUno;
+
+  /*
+   * A sua carta parte no clique, sem esperar o servidor confirmar. Ela é a
+   * única que o cliente conhece antes da resposta — e é justamente a que não
+   * pode esperar: os 100ms da ida e volta são o tempo de ela voltar para o
+   * leque e sair de novo. Se a jogada for recusada, a carta reaparece na mão.
+   *
+   * O destino é a pose EXATA que ela terá na pilha, com o mesmo espalhamento
+   * que o DiscardPile vai calcular. Voar até o centro e espalhar depois custa
+   * um pulo de uns quinze pixels no quadro seguinte ao pouso.
+   */
+  const launch = (card: Card, from: Pose) => {
+    const total = state.discardCount + 1;
+    const { rot, dx, dy } = scatter(total - 1, total, true);
+    flyPlay({ kind: "me", from }, { id: card.id, art: artUrl(card) }, { rot, dx, dy });
+    markLeaving(card.id);
+  };
+
+  const play = (cardId: string, from: Pose) => {
+    const card = hand.find((item) => item.id === cardId);
+    if (!card) return;
+    // O coringa não sai da mão enquanto a cor não for escolhida: quem parte é
+    // o seletor, e a carta só voa quando a jogada de fato é enviada.
+    if (isWild(card)) return setPendingWild(cardId);
+    actions.play(cardId);
+    launch(card, from);
+  };
+
+  const pickColor = (color: PlayColor) => {
+    const index = hand.findIndex((item) => item.id === pendingWild);
+    const card = hand[index];
+    const from = index === -1 ? null : handCardPose(index);
+    if (card) actions.play(card.id, color);
+    if (card && from) launch(card, from);
+    setPendingWild(null);
+  };
+
+  return (
+    <div className="uno-table flex min-h-dvh flex-col gap-3 p-4">
+      <header className="px-slab flex flex-wrap items-center justify-between gap-3 px-4 py-2">
+        <span className="flex items-baseline gap-2">
+          <span className="px-label">{state.roomName}</span>
+          <span className="text-sm" style={{ color: "var(--paper-hi)" }}>
+            vez de <b style={{ color: "var(--mark)" }}>{current?.name ?? "—"}</b>
+          </span>
+        </span>
+
+        <span className="flex items-center gap-4">
+          {state.currentColor && (
+            <span className="flex items-center gap-2">
+              <span
+                className="inline-block size-4"
+                style={{
+                  background: COLOR_HEX[state.currentColor],
+                  border: "2px solid var(--rim)",
+                }}
+              />
+              <span className="px-label">{COLOR_LABEL[state.currentColor]}</span>
+            </span>
+          )}
+          <span className="px-label" title="direção">
+            {state.direction === 1 ? "↻ horário" : "↺ anti-horário"}
+          </span>
+          <button
+            type="button"
+            onClick={toggleSound}
+            className="px-link"
+            aria-label={soundEnabled ? "Desligar o som" : "Ligar o som"}
+          >
+            {soundEnabled ? "🔊" : "🔇"}
+          </button>
+        </span>
+      </header>
+
+      <section className="flex flex-wrap items-start justify-center gap-4">
+        {seats.map((player) => (
+          <PlayerSeat
+            key={player.id}
+            player={player}
+            active={player.id === state.currentPlayerId}
+            isHost={player.id === state.hostId}
+            catchable={
+              state.catchOpen &&
+              state.vulnerablePlayerId === player.id &&
+              player.id !== sessionId
+            }
+            onCatch={() => actions.catchUno(player.id)}
+          />
+        ))}
+      </section>
+
+      {/* A mesa: o que está em jogo, e de todo mundo. */}
+      <section className="flex flex-1 items-center justify-center gap-12 sm:gap-20">
+        <DrawPile
+          remaining={state.deckCount}
+          // Só se compra sem jogada possível — com o +2/+4 pendente a lista vem vazia.
+          disabled={!yourTurn || playableIds.size > 0}
+          onDraw={actions.draw}
+        />
+        <DiscardPile
+          ref={discardRef}
+          cards={state.discard}
+          total={state.discardCount}
+          armed={dropArmed}
+        />
+      </section>
+
+      {/*
+        O seu lado: as ações são sobre a sua mão, não sobre as pilhas, então
+        moram junto do leque. As duas seções são `flex-1`, então a folga de uma
+        tela alta se divide entre a mesa e você em vez de empoçar num lugar só.
+        O log flutua por cima do canto: uma coluna fixa empurraria o leque e a
+        página ganharia rolagem.
+      */}
+      {/*
+        O gap-8 abaixo das ações são os mesmos 32px que a carta sobe no hover,
+        então uma carta levantada encosta nos botões em vez de cobri-los.
+
+        Sem `flex-1` aqui: toda a folga vai para a mesa, que centra as pilhas, e
+        o seu lado fica a uma distância fixa da borda de baixo. Centrar este
+        bloco faria a folga sob a mão crescer com a altura da janela — 322px de
+        feltro vazio num monitor de 1920.
+      */}
+      <div className="relative mt-3 flex flex-col items-center gap-8 pb-8">
+        <div className="absolute bottom-0 left-0 hidden md:block">
+          <SystemLog messages={state.log} />
+        </div>
+
+        <div className="flex min-h-9 flex-wrap items-center justify-center gap-3">
+          {state.pendingDraw > 0 && yourTurn && (
+            <span className="px-label" style={{ color: "var(--mark)" }}>
+              Compre {state.pendingDraw} cartas
+            </span>
+          )}
+          {state.mustPlayDrawn && yourTurn && (
+            <button type="button" onClick={actions.pass} className="px-btn">
+              Passar a vez
+            </button>
+          )}
+          {/* Só acende na janela em que vale — o botão desabilitado é o que
+              impede o clique adiantado, e o servidor recusa de qualquer jeito. */}
+          <button
+            type="button"
+            onClick={actions.callUno}
+            disabled={!canCallUno}
+            className={`px-btn px-btn-primary ${canCallUno ? "px-btn-urgent" : ""}`}
+          >
+            UNO!
+          </button>
+        </div>
+
+        <Hand
+          cards={hand}
+          playableIds={playableIds}
+          yourTurn={yourTurn}
+          dropTarget={discardRef}
+          onPlay={play}
+          onDragOver={setDropArmed}
+        />
+      </div>
+
+      {pendingWild && (
+        <WildPicker
+          currentColor={state.currentColor}
+          onPick={pickColor}
+          onCancel={() => setPendingWild(null)}
+        />
+      )}
+
+      {state.phase === "finished" && (
+        <div className="fixed inset-0 z-40 grid place-content-center bg-black/70 p-4">
+          <div className="px-slab flex flex-col items-center gap-4 p-8 text-center">
+            <p className="px-label">Fim de partida</p>
+            <p className="px-code">
+              {state.players.find((player) => player.id === state.winnerId)?.name ?? "Ninguém"}
+            </p>
+            <p className="px-label">venceu</p>
+            {state.hostId === sessionId && (
+              <button type="button" onClick={actions.restart} className="px-btn px-btn-primary">
+                Jogar de novo
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Opponents in turn order starting after you; you are not drawn as a seat. */
+function seatOrder(state: TableState, sessionId: string) {
+  const index = state.players.findIndex((player) => player.id === sessionId);
+  if (index === -1) return state.players;
+  return [...state.players.slice(index + 1), ...state.players.slice(0, index)];
+}
+
+function useTableSounds(state: TableState, sessionId: string, handSize: number) {
+  const play = useSound();
+  const previous = useRef({ discardCount: 0, handSize: 0, turn: "", phase: state.phase });
+
+  useEffect(() => {
+    const before = previous.current;
+    if (state.discardCount > before.discardCount) play("play");
+    if (handSize > before.handSize) play("draw");
+    if (state.currentPlayerId === sessionId && before.turn !== sessionId) play("turn");
+    if (state.phase === "finished" && before.phase !== "finished") play("victory");
+    previous.current = {
+      discardCount: state.discardCount,
+      handSize,
+      turn: state.currentPlayerId,
+      phase: state.phase,
+    };
+  }, [handSize, play, sessionId, state.currentPlayerId, state.discardCount, state.phase]);
+}
