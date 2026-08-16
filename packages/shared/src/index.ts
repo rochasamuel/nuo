@@ -32,29 +32,88 @@ export const UNO_PENALTY = 2;
  * esperando, enquanto quem tem que gritar ainda precisa reagir e mirar.
  */
 export const UNO_GRACE = 50;
-/** Seconds a dropped player keeps their seat before the room gives up on them. */
-export const RECONNECT_TIMEOUT = 60;
+/**
+ * Quanto tempo, em ms, a roleta do sorteio gira antes de as cartas serem
+ * repartidas. É o servidor que conta: o sorteado já está decidido quando a
+ * roleta começa, e o que este número compra é a mesa inteira vendo a mesma
+ * volta ao mesmo tempo. Curto demais e ninguém lê o nome; longo demais e vira
+ * pedágio entre apertar "Começar" e jogar — dois segundos e meio é uma volta
+ * que desacelera, para e ainda deixa o nome parado por um instante.
+ */
+export const STARTER_SPIN = 2600;
+/**
+ * Segundos que um jogador caído mantém o lugar durante a partida. Segurar o
+ * lugar por muito tempo é o que trava a mesa quando a queda é na vez dele: os
+ * outros ficam olhando um relógio que não é deles. Um minuto e meio é o que
+ * cobre um elevador ou um túnel sem transformar a partida em sala de espera.
+ */
+export const RECONNECT_TIMEOUT = 90;
+/**
+ * O mesmo, fora da partida — e aqui pode ser generoso, porque ninguém está
+ * esperando uma vez. O caso comum não é a internet cair: é o host sair do
+ * navegador para mandar o link no WhatsApp. O celular congela a aba, o socket
+ * morre, e a mesa recém-criada, que só tem ele, some junto. Enquanto o lugar
+ * está guardado a sala continua de pé, então este número é também o tempo que
+ * uma mesa vazia sobrevive ao seu criador.
+ */
+export const LOBBY_RECONNECT_TIMEOUT = 300;
+
+/* ------------------------------------------------------------ regras da casa */
+
+/**
+ * As variações opcionais do jogo. Escolhidas ao abrir a mesa e imutáveis
+ * depois: a partida inteira é jogada sob o mesmo combinado, e quem entra pelo
+ * link lê no lobby o que já foi combinado.
+ */
+export type HouseRules = {
+  /** +2 e +4 podem ser respondidos com outro do mesmo tipo, acumulando a compra. */
+  stacking: boolean;
+  /** Sem jogada, compra-se até vir uma carta que sirva, e não uma só. */
+  drawUntilPlayable: boolean;
+};
+
+export const DEFAULT_RULES: HouseRules = { stacking: false, drawUntilPlayable: false };
+
+/**
+ * A lista que a tela inicial vira checkbox e o lobby vira texto. Uma regra nova
+ * é uma linha aqui e um campo em `HouseRules` — nenhuma tela precisa saber
+ * quais regras existem.
+ */
+export const RULES: { key: keyof HouseRules; label: string; hint: string }[] = [
+  {
+    key: "stacking",
+    label: "Empilhar +2 e +4",
+    hint: "Responda um +2 com outro +2, ou um +4 com outro +4, e quem não tiver compra tudo. Nunca cruzado, e uma carta por vez.",
+  },
+  {
+    key: "drawUntilPlayable",
+    label: "Comprar até achar",
+    hint: "Sem jogada na mão, compre até vir uma carta que sirva — e então baixe essa carta ou passe a vez.",
+  },
+];
 
 export const isWild = (card: Card) =>
   card.type === "wild" || card.type === "wild-draw-four";
 
+/** O nome de cada cor, em português. É o vocabulário do log e da interface. */
+export const COLOR_NAME: Record<CardColor, string> = {
+  red: "vermelho",
+  yellow: "amarelo",
+  green: "verde",
+  blue: "azul",
+  wild: "",
+};
+
 export function cardLabel(card: Card): string {
-  const color: Record<CardColor, string> = {
-    red: "vermelho",
-    yellow: "amarelo",
-    green: "verde",
-    blue: "azul",
-    wild: "",
-  };
   switch (card.type) {
     case "number":
-      return `${card.value} ${color[card.color]}`;
+      return `${card.value} ${COLOR_NAME[card.color]}`;
     case "skip":
-      return `bloqueio ${color[card.color]}`;
+      return `bloqueio ${COLOR_NAME[card.color]}`;
     case "reverse":
-      return `inverte ${color[card.color]}`;
+      return `inverte ${COLOR_NAME[card.color]}`;
     case "draw-two":
-      return `+2 ${color[card.color]}`;
+      return `+2 ${COLOR_NAME[card.color]}`;
     case "wild":
       return "coringa troca cor";
     case "wild-draw-four":
@@ -104,8 +163,11 @@ export type TableState = {
   hostId: string;
   phase: GamePhase;
   maxPlayers: number;
+  rules: HouseRules;
   players: PublicPlayer[];
   currentPlayerId: string;
+  /** O sorteado, enquanto a roleta gira. Vazio fora do sorteio. */
+  starterId: string;
   currentColor: PlayColor | "";
   direction: 1 | -1;
   pendingDraw: number;
@@ -132,6 +194,7 @@ export type CreateRoomOptions = {
   roomName: string;
   playerName: string;
   maxPlayers: number;
+  rules: HouseRules;
 };
 
 export type JoinRoomOptions = {

@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import {
   PLAY_COLORS,
+  STARTER_SPIN,
   type Card,
   type CardType,
   type PlayColor,
@@ -9,6 +10,7 @@ import {
   type TableState,
 } from "@uno/shared";
 import { FlightLayer } from "../components/FlightLayer";
+import { StarterRoulette } from "../components/StarterRoulette";
 import { Table } from "../components/Table";
 import { flyDeal, flyDraw } from "../game/flights";
 import type { RoomActions } from "../game/useRoomConnection";
@@ -56,11 +58,15 @@ export function MockScreen() {
   const [wildOnTop, setWildOnTop] = useState(true);
   const [finished, setFinished] = useState(false);
   const [pendingDraw, setPendingDraw] = useState(0);
+  const [stacking, setStacking] = useState(true);
+  const [drawUntilPlayable, setDrawUntilPlayable] = useState(false);
   const [catchOpen, setCatchOpen] = useState(true);
   const [mustPlayDrawn, setMustPlayDrawn] = useState(false);
   const [nudge, setNudge] = useState(0);
   /** Cartas já jogadas nesta mão: sai a que se clicou, não a última. */
   const [played, setPlayed] = useState<string[]>([]);
+  /** A volta da roleta em exibição, se houver uma. */
+  const [draft, setDraft] = useState<{ round: number; winnerId: string } | null>(null);
 
   const hand = useMemo(
     () =>
@@ -99,8 +105,11 @@ export function MockScreen() {
       hostId: ME,
       phase: finished ? "finished" : "playing",
       maxPlayers: 10,
+      rules: { stacking, drawUntilPlayable },
       players,
       currentPlayerId: ME,
+      // Sem sorteio em curso: em /mock a roleta é um botão da barra lateral.
+      starterId: "",
       currentColor: "green" as PlayColor,
       direction: -1,
       pendingDraw,
@@ -114,13 +123,24 @@ export function MockScreen() {
       log: [
         "A partida começou com 2 azul.",
         "Ana Beatriz jogou bloqueio azul.",
-        "Bruno comprou uma carta.",
-        "Caio jogou coringa troca cor.",
+        "Bruno comprou 3 até achar uma jogável.",
+        "Bruno passou a vez.",
+        "Caio jogou coringa troca cor e escolheu verde.",
         "Dandara gritou UNO!",
         "A compra acabou: o descarte foi reembaralhado.",
       ],
     };
-  }, [catchOpen, finished, hand.length, mustPlayDrawn, pendingDraw, playerCount, wildOnTop]);
+  }, [
+    catchOpen,
+    drawUntilPlayable,
+    finished,
+    hand.length,
+    mustPlayDrawn,
+    pendingDraw,
+    playerCount,
+    stacking,
+    wildOnTop,
+  ]);
 
   // Metade das cartas jogáveis, para ver as duas aparências no mesmo leque.
   const playableIds = useMemo(
@@ -138,16 +158,41 @@ export function MockScreen() {
     start: () => {},
     // A jogada já sai voando pela própria Table, que é quem conhece a carta e o
     // ponto de onde ela partiu. Aqui só falta tirá-la da mão.
-    play: (cardId) => setPlayed((ids) => [...ids, cardId]),
+    play: (cardId) => {
+      setPlayed((ids) => [...ids, cardId]);
+      // O empilhamento é a única regra com número na tela: aqui a pilha cresce
+      // a cada +2/+4 baixado, que é o que faz o contador da lateral aparecer.
+      const chosen = hand.find((card) => card.id === cardId);
+      const stacked = chosen?.type === "draw-two" ? 2 : chosen?.type === "wild-draw-four" ? 4 : 0;
+      if (stacking && stacked) setPendingDraw((n) => n + stacked);
+    },
     draw: () => {
-      const count = Math.max(1, pendingDraw);
+      // Sem pilha pendente é uma carta — ou a corrida da regra de comprar até
+      // achar, que aqui para sempre na terceira só para se ver o voo em fila.
+      const count = pendingDraw || (drawUntilPlayable ? 3 : 1);
       flyDraw({ toSeat: null, count });
       setHandSize((size) => size + count);
+      setPendingDraw(0);
     },
     pass: () => setMustPlayDrawn(false),
     callUno: () => {},
     catchUno: (targetId) => flyDraw({ toSeat: targetId, count: 2 }),
     restart: () => setFinished(false),
+  };
+
+  /*
+   * A roleta do sorteio, que na mesa de verdade roda uma vez por partida e some.
+   * Aqui ela é um botão, e cada volta tira um nome diferente — o `round` é o que
+   * a remonta, senão o segundo clique cairia numa roleta já parada.
+   */
+  const spin = () => {
+    const winner = state.players[Math.floor(Math.random() * state.players.length)];
+    const round = (draft?.round ?? 0) + 1;
+    setDraft({ round, winnerId: winner.id });
+    setTimeout(
+      () => setDraft((current) => (current?.round === round ? null : current)),
+      STARTER_SPIN,
+    );
   };
 
   /** O reparto inicial inteiro, que de outro jeito só aparece uma vez por partida. */
@@ -167,6 +212,7 @@ export function MockScreen() {
         hand={hand}
         playableIds={playableIds}
         actions={actions}
+        onExit={() => setFinished(false)}
       />
 
       <div className="px-slab fixed top-16 right-4 z-30 flex w-56 flex-col gap-3 p-3">
@@ -174,8 +220,14 @@ export function MockScreen() {
 
         <Slider label="Cartas na mão" value={handSize} min={1} max={30} onChange={dealHand} />
         <Slider label="Jogadores" value={playerCount} min={2} max={10} onChange={setPlayerCount} />
-        <Slider label="Compra pendente" value={pendingDraw} min={0} max={4} onChange={setPendingDraw} />
+        <Slider label="Compra pendente" value={pendingDraw} min={0} max={12} onChange={setPendingDraw} />
 
+        <Toggle label="Empilhar +2/+4" on={stacking} onClick={() => setStacking((v) => !v)} />
+        <Toggle
+          label="Comprar até achar"
+          on={drawUntilPlayable}
+          onClick={() => setDrawUntilPlayable((v) => !v)}
+        />
         <Toggle label="Coringa no topo" on={wildOnTop} onClick={() => setWildOnTop((v) => !v)} />
         <Toggle label="Pegar liberado" on={catchOpen} onClick={() => setCatchOpen((v) => !v)} />
         <Toggle label="Comprou, pode passar" on={mustPlayDrawn} onClick={() => setMustPlayDrawn((v) => !v)} />
@@ -194,11 +246,23 @@ export function MockScreen() {
         <button type="button" className="px-btn" onClick={deal}>
           Repartir
         </button>
+        <button type="button" className="px-btn" onClick={spin}>
+          Sortear quem começa
+        </button>
         <p className="px-label">
           Clique numa carta para jogar; no monte para comprar. A compra pendente
-          define quantas cartas voam de uma vez.
+          define quantas cartas voam de uma vez. Com o empilhamento ligado, cada
+          +2/+4 jogado soma à pilha e o contador da lateral acompanha.
         </p>
       </div>
+
+      {draft && (
+        <StarterRoulette
+          key={draft.round}
+          players={state.players}
+          winnerId={draft.winnerId}
+        />
+      )}
 
       <FlightLayer />
     </>

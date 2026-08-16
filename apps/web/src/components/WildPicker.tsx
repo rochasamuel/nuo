@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
-import type { PlayColor } from "@uno/shared";
-import { COLOR_HEX, COLOR_LABEL } from "../lib/cards";
+import { useEffect, useRef, useState } from "react";
+import { COLOR_NAME, type PlayColor } from "@uno/shared";
+import { COLOR_HEX } from "../lib/cards";
 
 /*
  * O coringa não tem símbolo central: o símbolo é o oval da própria carta,
@@ -58,6 +58,18 @@ type Props = {
 export function WildPicker({ currentColor, onPick, onCancel }: Props) {
   const [aimed, setAimed] = useState<PlayColor | null>(null);
 
+  /*
+   * O toque que joga o coringa gera um clique depois de soltar o dedo, e a essa
+   * altura este seletor já nasceu debaixo dele: no celular a cor saía escolhida
+   * sozinha — a do quadrante que calhou de estar sob o dedo — ou o fundo comia
+   * o toque e o seletor fechava antes de aparecer. Um clique só vale se a
+   * pressão dele também aconteceu aqui dentro; o clique fantasma vem sem
+   * `pointerdown` nenhum. O teclado não passa por ponteiro, e `detail === 0` é
+   * como ele se anuncia.
+   */
+  const pressed = useRef(false);
+  const genuine = (event: { detail: number }) => pressed.current || event.detail === 0;
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => event.key === "Escape" && onCancel();
     addEventListener("keydown", onKey);
@@ -67,7 +79,8 @@ export function WildPicker({ currentColor, onPick, onCancel }: Props) {
   return (
     <div
       className="fixed inset-0 z-50 grid place-content-center bg-black/70 p-4"
-      onClick={onCancel}
+      onPointerDown={() => (pressed.current = true)}
+      onClick={(event) => genuine(event) && onCancel()}
     >
       <div
         className="px-slab flex flex-col items-center gap-4 p-6"
@@ -116,8 +129,8 @@ export function WildPicker({ currentColor, onPick, onCancel }: Props) {
               <button
                 key={color}
                 type="button"
-                aria-label={COLOR_LABEL[color]}
-                onClick={() => onPick(color)}
+                aria-label={COLOR_NAME[color]}
+                onClick={(event) => genuine(event) && onPick(color)}
                 onPointerEnter={() => setAimed(color)}
                 onPointerLeave={() => setAimed(null)}
                 onFocus={() => setAimed(color)}
@@ -127,12 +140,12 @@ export function WildPicker({ currentColor, onPick, onCancel }: Props) {
           </div>
         </div>
 
-        <p className="px-label h-4">{aimed ? COLOR_LABEL[aimed] : "toque um quadrante"}</p>
+        <p className="px-label h-4">{aimed ? COLOR_NAME[aimed] : "toque um quadrante"}</p>
 
         {currentColor && (
           <button
             type="button"
-            onClick={() => onPick(currentColor)}
+            onClick={(event) => genuine(event) && onPick(currentColor)}
             onPointerEnter={() => setAimed(currentColor)}
             onPointerLeave={() => setAimed(null)}
             onFocus={() => setAimed(currentColor)}
@@ -143,7 +156,7 @@ export function WildPicker({ currentColor, onPick, onCancel }: Props) {
               className="inline-block size-3"
               style={{ background: COLOR_HEX[currentColor], border: "2px solid var(--rim)" }}
             />
-            Manter {COLOR_LABEL[currentColor]}
+            Manter {COLOR_NAME[currentColor]}
           </button>
         )}
       </div>

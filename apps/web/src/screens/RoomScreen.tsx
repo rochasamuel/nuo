@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { MIN_PLAYERS } from "@uno/shared";
+import { MIN_PLAYERS, RULES } from "@uno/shared";
 import { FlightLayer } from "../components/FlightLayer";
+import { StarterRoulette } from "../components/StarterRoulette";
 import { Table } from "../components/Table";
 import { useFlights } from "../game/useFlights";
 import { useRoomConnection } from "../game/useRoomConnection";
@@ -15,13 +16,20 @@ export function RoomScreen({ code }: { code: string }) {
   // existir, e quem assina os eventos precisa já estar de pé.
   useFlights(state, connection.sessionId, connection.onFx);
 
+  const exit = () => {
+    connection.leave();
+    navigate("/");
+  };
+
   return (
     <>
       {status === "naming" && (
         <NameGate code={code} error={connection.error} onJoin={connection.join} />
       )}
 
-      {status === "lost" && <Disconnected />}
+      {status === "lost" && (
+        <Disconnected error={connection.error} onRetry={connection.retry} onExit={exit} />
+      )}
 
       {status === "connecting" && <Centered title="Conectando" />}
 
@@ -38,7 +46,15 @@ export function RoomScreen({ code }: { code: string }) {
           hand={connection.hand}
           playableIds={connection.playableIds}
           actions={connection.actions}
+          onExit={exit}
         />
+      )}
+
+      {/* Um sorteado publicado é um sorteio em curso, e nada mais: o servidor o
+          apaga ao repartir. Vale para a primeira partida e para cada revanche,
+          e é o que impede a roleta de reaparecer sobre o fim da partida. */}
+      {state?.starterId && (
+        <StarterRoulette players={state.players} winnerId={state.starterId} />
       )}
 
       <FlightLayer />
@@ -74,11 +90,31 @@ function Lobby({
   const [copied, setCopied] = useState(false);
   const state = connection.state!;
   const isHost = state.hostId === connection.sessionId;
+  const canShare = typeof navigator.share === "function";
 
   const copy = async () => {
     await navigator.clipboard.writeText(roomUrl(code));
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
+  };
+
+  /*
+   * A folha de compartilhamento do sistema abre por cima da página em vez de
+   * mandar o host para outro app. É a diferença entre a aba continuar viva e o
+   * celular congelá-la — e era congelando que a mesa recém-criada morria antes
+   * de alguém receber o código. Sem suporte, copiar continua servindo.
+   */
+  const invite = async () => {
+    if (!navigator.share) return copy();
+    try {
+      await navigator.share({
+        title: state.roomName,
+        text: `Entre na minha mesa de UNO. Código: ${code}`,
+        url: roomUrl(code),
+      });
+    } catch {
+      // Cancelar a folha é uma resposta, não um erro: nada a fazer.
+    }
   };
 
   return (
@@ -89,14 +125,21 @@ function Lobby({
         <p className="px-code">{code}</p>
       </div>
 
-      <div className="flex items-end gap-2">
-        <label className="flex flex-1 flex-col gap-1">
-          <span className="px-label">Link do convite</span>
-          <input readOnly value={roomUrl(code)} className="px-input text-xs" />
-        </label>
-        <button type="button" onClick={copy} className="px-btn">
-          {copied ? "Copiado" : "Copiar"}
-        </button>
+      <div className="flex flex-col gap-2">
+        <div className="flex items-end gap-2">
+          <label className="flex flex-1 flex-col gap-1">
+            <span className="px-label">Link do convite</span>
+            <input readOnly value={roomUrl(code)} className="px-input text-xs" />
+          </label>
+          <button type="button" onClick={copy} className="px-btn">
+            {copied ? "Copiado" : "Copiar"}
+          </button>
+        </div>
+        {canShare && (
+          <button type="button" onClick={invite} className="px-btn">
+            Convidar por outro app
+          </button>
+        )}
       </div>
 
       <div className="px-slab flex flex-col gap-2 p-5">
@@ -119,6 +162,22 @@ function Lobby({
           ))}
         </ul>
       </div>
+
+      {/* Quem chega pelo link não escolheu nada: o combinado da mesa precisa
+          estar escrito antes de a primeira carta cair. */}
+      {RULES.some(({ key }) => state.rules[key]) && (
+        <div className="px-slab flex flex-col gap-2 p-5">
+          <p className="px-label">Regras da casa</p>
+          {RULES.filter(({ key }) => state.rules[key]).map(({ key, label, hint }) => (
+            <p key={key} className="text-sm" style={{ color: "var(--paper-hi)" }}>
+              {label}
+              <span className="block text-xs" style={{ color: "var(--paper-sh)" }}>
+                {hint}
+              </span>
+            </p>
+          ))}
+        </div>
+      )}
 
       {isHost ? (
         <button
@@ -205,17 +264,31 @@ function NameGate({
   );
 }
 
-function Disconnected() {
+/**
+ * Recarregar a página era o botão errado: o token do lugar está no
+ * localStorage, então tentar de novo é só refazer o caminho de conexão — e o
+ * hook já refaz sozinho quando a aba volta ao primeiro plano. O botão fica para
+ * quem voltou antes de o servidor perceber a queda.
+ */
+function Disconnected({
+  error,
+  onRetry,
+  onExit,
+}: {
+  error: string;
+  onRetry: () => void;
+  onExit: () => void;
+}) {
   return (
     <Centered title="Fora da partida">
       <p className="text-sm" style={{ color: "var(--paper-sh)" }}>
-        O lugar na mesa não pôde ser recuperado.
+        {error || "O lugar na mesa não pôde ser recuperado."}
       </p>
       <div className="flex justify-center gap-3">
-        <button type="button" onClick={() => location.reload()} className="px-btn">
+        <button type="button" onClick={onRetry} className="px-btn px-btn-primary">
           Tentar de novo
         </button>
-        <button type="button" onClick={() => navigate("/")} className="px-btn">
+        <button type="button" onClick={onExit} className="px-btn">
           Início
         </button>
       </div>

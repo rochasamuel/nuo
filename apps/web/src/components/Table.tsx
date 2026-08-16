@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState } from "react";
-import { isWild, type Card, type PlayColor, type TableState } from "@uno/shared";
+import { COLOR_NAME, isWild, type Card, type PlayColor, type TableState } from "@uno/shared";
 import type { RoomActions } from "../game/useRoomConnection";
 import { flyPlay, handCardPose, markLeaving, type Pose } from "../game/flights";
-import { artUrl, COLOR_HEX, COLOR_LABEL, scatter } from "../lib/cards";
+import { artUrl, COLOR_HEX, scatter } from "../lib/cards";
 import { useSound } from "../lib/sound";
 import { useUi } from "../store/ui";
 import { DiscardPile } from "./DiscardPile";
 import { DrawPile } from "./DrawPile";
 import { Hand } from "./Hand";
 import { PlayerSeat } from "./PlayerSeat";
+import { StackCounter } from "./StackCounter";
 import { SystemLog } from "./SystemLog";
 import { WildPicker } from "./WildPicker";
 
@@ -18,9 +19,11 @@ type Props = {
   hand: Card[];
   playableIds: Set<string>;
   actions: RoomActions;
+  /** Deixa a mesa e volta para a tela inicial. */
+  onExit: () => void;
 };
 
-export function Table({ state, sessionId, hand, playableIds, actions }: Props) {
+export function Table({ state, sessionId, hand, playableIds, actions, onExit }: Props) {
   const discardRef = useRef<HTMLDivElement>(null);
   const [dropArmed, setDropArmed] = useState(false);
   const [pendingWild, setPendingWild] = useState<string | null>(null);
@@ -91,7 +94,7 @@ export function Table({ state, sessionId, hand, playableIds, actions }: Props) {
                   border: "2px solid var(--rim)",
                 }}
               />
-              <span className="px-label">{COLOR_LABEL[state.currentColor]}</span>
+              <span className="px-label">{COLOR_NAME[state.currentColor]}</span>
             </span>
           )}
           <span className="px-label" title="direção">
@@ -126,11 +129,19 @@ export function Table({ state, sessionId, hand, playableIds, actions }: Props) {
       </section>
 
       {/* A mesa: o que está em jogo, e de todo mundo. */}
-      <section className="flex flex-1 items-center justify-center gap-12 sm:gap-20">
+      <section className="relative flex flex-1 items-center justify-center gap-12 sm:gap-20">
+        {state.rules.stacking && state.pendingDraw > 0 && (
+          <StackCounter
+            key={state.pendingDraw}
+            amount={state.pendingDraw}
+            owner={current?.name ?? ""}
+          />
+        )}
         <DrawPile
           remaining={state.deckCount}
-          // Só se compra sem jogada possível — com o +2/+4 pendente a lista vem vazia.
-          disabled={!yourTurn || playableIds.size > 0}
+          // Só se compra sem jogada possível — mas pagar a pilha é sempre uma
+          // saída, mesmo com um +2 na mão para empilhar.
+          disabled={!yourTurn || (state.pendingDraw === 0 && playableIds.size > 0)}
           onDraw={actions.draw}
         />
         <DiscardPile
@@ -165,7 +176,11 @@ export function Table({ state, sessionId, hand, playableIds, actions }: Props) {
         <div className="flex min-h-9 flex-wrap items-center justify-center gap-3">
           {state.pendingDraw > 0 && yourTurn && (
             <span className="px-label" style={{ color: "var(--mark)" }}>
-              Compre {state.pendingDraw} cartas
+              {/* Só há carta jogável com a pilha de pé numa mesa que empilha, e
+                  aí comprar deixa de ser a única saída. */}
+              {playableIds.size > 0
+                ? `Empilhe ou compre ${state.pendingDraw}`
+                : `Compre ${state.pendingDraw} cartas`}
             </span>
           )}
           {state.mustPlayDrawn && yourTurn && (
@@ -211,11 +226,25 @@ export function Table({ state, sessionId, hand, playableIds, actions }: Props) {
               {state.players.find((player) => player.id === state.winnerId)?.name ?? "Ninguém"}
             </p>
             <p className="px-label">venceu</p>
-            {state.hostId === sessionId && (
-              <button type="button" onClick={actions.restart} className="px-btn px-btn-primary">
-                Jogar de novo
+
+            {/* Duas saídas para o fim da partida: outra mão, ou a porta. Quem
+                não é host só tem a porta — e antes não tinha nenhuma. */}
+            <div className="flex flex-col items-stretch gap-2">
+              {state.hostId === sessionId ? (
+                <button
+                  type="button"
+                  onClick={actions.restart}
+                  className="px-btn px-btn-primary"
+                >
+                  Jogar de novo
+                </button>
+              ) : (
+                <p className="px-label">Aguardando o host começar outra</p>
+              )}
+              <button type="button" onClick={onExit} className="px-btn">
+                Voltar ao início
               </button>
-            )}
+            </div>
           </div>
         </div>
       )}

@@ -543,6 +543,51 @@ body {
   animation: px-blink 1s steps(1, end) infinite;
 }
 
+/* ---- roleta do sorteio ---------------------------------------------------
+ * A janela é um sulco, como o campo de texto: o nome está DENTRO da chapa, e é
+ * isso que faz o rolo parecer uma peça girando atrás dela em vez de um texto
+ * trocando. Quem gira é o React, um nome por quadro (ver StarterRoulette.tsx).
+ * ------------------------------------------------------------------------- */
+
+.uno-roulette {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  /* Caixa fixa: o nome troca a cada quadro e nomes têm larguras diferentes —
+     um painel que se remede a cada troca tremeria a volta inteira. */
+  width: min(72vw, 300px);
+  height: 44px;
+  padding: 0 12px;
+  background: var(--slab-sh);
+  border: var(--stroke) solid var(--rim);
+  box-shadow: inset 2px 2px 0 rgba(0, 0, 0, 0.5);
+}
+
+.uno-roulette-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--paper-sh);
+  text-shadow: 2px 2px 0 var(--rim);
+}
+/* O sorteado acende no amarelo da mesa: é a única cor de ênfase, e aqui ela
+   diz "parou aqui". */
+.uno-roulette-name.is-drawn {
+  color: var(--mark);
+}
+
+.uno-roulette-mark {
+  color: var(--gloss);
+}
+.uno-roulette:has(.is-drawn) .uno-roulette-mark {
+  color: var(--mark);
+}
+
 /* ---- seletor de cor do coringa ------------------------------------------
  * É a própria carta: o oval inclinado 25°, dividido em quatro pelos eixos DO
  * OVAL — mesma elipse, mesma inclinação, mesmas cores e mesma ordem de leitura

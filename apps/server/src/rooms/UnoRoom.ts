@@ -1,9 +1,12 @@
 import { Room, type Client, type CloseCode } from "colyseus";
 import {
   DEFAULT_MAX_PLAYERS,
+  LOBBY_RECONNECT_TIMEOUT,
   MAX_PLAYERS,
   MIN_PLAYERS,
   RECONNECT_TIMEOUT,
+  RULES,
+  STARTER_SPIN,
   UNO_GRACE,
   type CatchMessage,
   type CreateRoomOptions,
@@ -30,13 +33,11 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
   private connected = new Set<string>();
   /** Reavisa os clientes quando a carência do "Pegar" termina. */
   private graceTimer?: { clear: () => void };
+  /** A volta da roleta em curso. Enquanto existir, a mesa está sorteando. */
+  private starterTimer?: { clear: () => void };
 
   messages = {
-    start: (client: Client) => this.act(client, () => {
-      this.requireHost(client);
-      this.game.start();
-      this.lock();
-    }),
+    start: (client: Client) => this.act(client, () => this.draft(client)),
 
     play: (client: Client, message: PlayMessage) => this.act(client, () =>
       this.game.playCard(client.sessionId, message?.cardId, message?.color),
@@ -63,7 +64,9 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
       if (this.game.phase !== "finished") {
         throw new GameError("A partida ainda está em andamento.");
       }
-      this.game.start();
+      // A revanche é uma partida nova, e uma partida nova se sorteia: o vencedor
+      // não herda a saída.
+      this.draft(client);
     }),
   };
 
@@ -76,6 +79,11 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
       MAX_PLAYERS,
     );
     this.maxClients = this.state.maxPlayers;
+    // O combinado da mesa entra aqui e não muda mais: `RULES` é a lista, e o
+    // cliente só pode ligar o que está nela.
+    for (const { key } of RULES) {
+      this.game.rules[key] = this.state.rules[key] = options?.rules?.[key] === true;
+    }
   }
 
   onJoin(client: Client, options: JoinRoomOptions) {
@@ -88,7 +96,12 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
   onDrop(client: Client) {
     this.connected.delete(client.sessionId);
     this.sync();
-    this.allowReconnection(client, RECONNECT_TIMEOUT);
+    // Guardar o lugar é também o que mantém a sala viva: o Colyseus só descarta
+    // uma sala sem clientes quando não há mais nenhuma reserva pendente.
+    this.allowReconnection(
+      client,
+      this.game.phase === "playing" ? RECONNECT_TIMEOUT : LOBBY_RECONNECT_TIMEOUT,
+    );
   }
 
   onReconnect(client: Client) {
@@ -102,7 +115,9 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
     if (this.state.hostId === client.sessionId) {
       this.state.hostId = this.game.players[0]?.id ?? "";
     }
-    if (this.game.phase !== "playing") this.unlock();
+    // A sala continua fechada enquanto a roleta gira: quem entrasse no meio da
+    // volta receberia cartas de um sorteio que já passou na tela dele.
+    if (this.game.phase !== "playing" && !this.starterTimer) this.unlock();
     this.sync();
   }
 
@@ -122,6 +137,38 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
         return;
       }
       throw error;
+    }
+    this.sync();
+  }
+
+  /**
+   * Sorteia quem começa e agenda a partida para quando a roleta parar.
+   *
+   * O sorteado é publicado ANTES de as cartas saírem: é ele que a roleta gira
+   * até encontrar, e é o servidor quem conta o tempo da volta. Fosse cada
+   * cliente a sortear a sua, cada mesa veria um vencedor diferente; fosse cada
+   * cliente a contar o tempo, o reparto chegaria em cima de uma roleta ainda
+   * girando na tela de quem tem a aba mais lenta.
+   */
+  private draft(client: Client) {
+    this.requireHost(client);
+    if (this.starterTimer) throw new GameError("O sorteio já está rolando.");
+    this.state.starterId = this.game.draftStarter();
+    this.lock();
+    this.starterTimer = this.clock.setTimeout(() => this.beginMatch(), STARTER_SPIN);
+  }
+
+  /** A roleta parou: as cartas saem, e o sorteio deixa de estar em curso. */
+  private beginMatch() {
+    this.starterTimer = undefined;
+    const starter = this.state.starterId;
+    this.state.starterId = "";
+    try {
+      this.game.start(starter);
+    } catch {
+      // A mesa desmanchou enquanto a roleta girava e não há mais partida a
+      // começar. O lobby reabre, e o host sorteia de novo quando houver gente.
+      this.unlock();
     }
     this.sync();
   }

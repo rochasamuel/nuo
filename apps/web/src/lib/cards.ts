@@ -12,13 +12,6 @@ export const COLOR_HEX: Record<PlayColor, string> = {
   blue: "var(--blue)",
 };
 
-export const COLOR_LABEL: Record<PlayColor, string> = {
-  red: "vermelho",
-  yellow: "amarelo",
-  green: "verde",
-  blue: "azul",
-};
-
 function hash(n: number) {
   n = Math.imul(n ^ (n >>> 15), 0x2c1b3c6d);
   n = Math.imul(n ^ (n >>> 12), 0x297a2d39);

@@ -28,6 +28,13 @@ const card = (
   value: number | null = null,
 ): Card => ({ id, color, type, value });
 
+/** Uma mesa sentada e ainda no lobby, para quem testa o que acontece ao começar. */
+function newTable(random: () => number, playerCount = 3) {
+  const game = new UnoGame(random);
+  for (let i = 0; i < playerCount; i++) game.addPlayer(`p${i}`, `P${i}`);
+  return game;
+}
+
 /** A started game normalized to a neutral position: red 5 on top, first player to act. */
 function newGame(playerCount = 3) {
   const game = new UnoGame(seeded(7));
@@ -140,6 +147,47 @@ describe("start", () => {
     game.addPlayer("a", "A");
     expect(() => game.start()).toThrow(GameError);
   });
+
+  /* O seed 7 abre num número: com um bloqueio ou um inverte na mesa a vez já
+     teria andado, e o teste falaria da carta inicial em vez do sorteio. */
+  it("begins on whoever was drafted", () => {
+    const game = newTable(seeded(7));
+    game.start("p2");
+    expect(game.currentPlayer!.id).toBe("p2");
+    expect(game.log).toContain("Sorteio: P2 começa a partida.");
+  });
+
+  it("falls back to the first seat when the drafted player left", () => {
+    const game = newTable(seeded(7));
+    game.start("gone");
+    expect(game.currentPlayer!.id).toBe("p0");
+  });
+});
+
+describe("draft", () => {
+  it("always draws someone who is at the table", () => {
+    for (let seed = 0; seed < 30; seed++) {
+      const game = newTable(seeded(seed), 4);
+      expect(game.players.map((p) => p.id)).toContain(game.draftStarter());
+    }
+  });
+
+  /* Sortear é o ponto do recurso: um sorteio que sempre cai no mesmo lugar é o
+     host começando sempre, que é o que havia antes. */
+  it("does not always land on the same seat", () => {
+    const drawn = new Set<string>();
+    for (let seed = 0; seed < 30; seed++) drawn.add(newTable(seeded(seed), 4).draftStarter());
+    expect(drawn.size).toBeGreaterThan(1);
+  });
+
+  /* A recusa vem no sorteio, e não quando a roleta para: quem apertou o botão
+     precisa ver o motivo enquanto ainda está olhando para ele. */
+  it("refuses on a table that cannot start", () => {
+    expect(() => newTable(seeded(1), 1).draftStarter()).toThrow(GameError);
+    const started = newTable(seeded(1));
+    started.start();
+    expect(() => started.draftStarter()).toThrow(GameError);
+  });
 });
 
 describe("turns", () => {
@@ -226,6 +274,143 @@ describe("action cards", () => {
     game.drawCard("p1");
     expect(game.players[1].hand).toHaveLength(11);
     expect(game.currentPlayer!.id).toBe("p2");
+  });
+});
+
+describe("stacking", () => {
+  /** Mesa com a regra ligada e um +2 já pendente sobre p1. */
+  function stackedGame() {
+    const game = newGame(3);
+    game.rules.stacking = true;
+    setHand(game, 0, [card("x", "red", "draw-two"), filler()]);
+    game.playCard("p0", "x");
+    return game;
+  }
+
+  it("lets a draw two answer a draw two, adding to the pile", () => {
+    const game = stackedGame();
+    setHand(game, 1, [card("y", "blue", "draw-two"), filler()]);
+    game.playCard("p1", "y");
+
+    expect(game.pendingDraw).toBe(4);
+    expect(game.currentPlayer!.id).toBe("p2");
+  });
+
+  it("hands the whole pile to whoever stops stacking", () => {
+    const game = stackedGame();
+    setHand(game, 1, [card("y", "blue", "draw-two"), filler()]);
+    game.playCard("p1", "y");
+    setHand(game, 2, [card("z", "green", "draw-two"), filler()]);
+    game.playCard("p2", "z");
+
+    expect(game.pendingDraw).toBe(6);
+    game.drawCard("p0");
+    expect(game.players[0].hand).toHaveLength(7);
+    expect(game.pendingDraw).toBe(0);
+    expect(game.currentPlayer!.id).toBe("p1");
+  });
+
+  it("never crosses the two types", () => {
+    const game = stackedGame();
+    setHand(game, 1, [card("y", "wild", "wild-draw-four"), filler()]);
+    expect(() => game.playCard("p1", "y", "blue")).toThrow(/precisa comprar/);
+
+    const four = newGame(3);
+    four.rules.stacking = true;
+    setHand(four, 0, [card("x", "wild", "wild-draw-four"), filler()]);
+    four.playCard("p0", "x", "red");
+    setHand(four, 1, [card("y", "red", "draw-two"), filler()]);
+    expect(() => four.playCard("p1", "y")).toThrow(/precisa comprar/);
+  });
+
+  it("stacks draw fours on each other", () => {
+    const game = newGame(3);
+    game.rules.stacking = true;
+    setHand(game, 0, [card("x", "wild", "wild-draw-four"), filler()]);
+    game.playCard("p0", "x", "red");
+    setHand(game, 1, [card("y", "wild", "wild-draw-four"), filler()]);
+    game.playCard("p1", "y", "green");
+
+    expect(game.pendingDraw).toBe(8);
+    expect(game.currentColor).toBe("green");
+  });
+
+  it("offers only the stackable cards while the pile is open", () => {
+    const game = stackedGame();
+    setHand(game, 1, [
+      card("y", "blue", "draw-two"),
+      card("n", "red", "number", 5),
+      card("w", "wild", "wild"),
+    ]);
+    expect(game.playableCards("p1").map((c) => c.id)).toEqual(["y"]);
+  });
+
+  it("stays off when the table did not ask for it", () => {
+    const game = newGame(3);
+    setHand(game, 0, [card("x", "red", "draw-two"), filler()]);
+    game.playCard("p0", "x");
+    setHand(game, 1, [card("y", "blue", "draw-two"), filler()]);
+
+    expect(() => game.playCard("p1", "y")).toThrow(/precisa comprar/);
+    expect(game.playableCards("p1")).toEqual([]);
+  });
+});
+
+describe("what the table is told", () => {
+  it("names the color chosen for a wild", () => {
+    const game = newGame(3);
+    setHand(game, 0, [card("x", "wild", "wild"), filler()]);
+    game.playCard("p0", "x", "green");
+    expect(game.log.at(-1)).toBe("P0 jogou coringa troca cor e escolheu verde.");
+  });
+
+  it("says who gave up the turn", () => {
+    const game = newGame(3);
+    setHand(game, 0, [filler()]);
+    game.deck = [card("d1", "red", "number", 3)];
+    game.drawCard("p0");
+    game.pass("p0");
+    expect(game.log.at(-1)).toBe("P0 passou a vez.");
+  });
+});
+
+describe("draw until playable", () => {
+  /** O monte sai do fim: as duas primeiras compras não servem, a terceira sim. */
+  function stackedDeck(game: UnoGame) {
+    game.deck = [card("d3", "red", "number", 3), card("d2", "blue", "number", 9), card("d1", "blue", "number", 8)];
+  }
+
+  it("keeps drawing until a card fits, then stops on it", () => {
+    const game = newGame(3);
+    game.rules.drawUntilPlayable = true;
+    setHand(game, 0, [filler()]);
+    stackedDeck(game);
+    game.drawCard("p0");
+
+    expect(game.players[0].hand).toHaveLength(4);
+    expect(game.currentPlayer!.id).toBe("p0");
+    expect(game.playableCards("p0").map((c) => c.id)).toEqual(["d3"]);
+  });
+
+  it("takes a single card when the table did not ask for it", () => {
+    const game = newGame(3);
+    setHand(game, 0, [filler()]);
+    stackedDeck(game);
+    game.drawCard("p0");
+
+    expect(game.players[0].hand).toHaveLength(2);
+    expect(game.currentPlayer!.id).toBe("p1");
+  });
+
+  it("gives up the turn when the cards run out first", () => {
+    const game = newGame(3);
+    game.rules.drawUntilPlayable = true;
+    setHand(game, 0, [filler()]);
+    game.deck = [card("d1", "blue", "number", 8)];
+    game.drawCard("p0");
+
+    expect(game.players[0].hand).toHaveLength(2);
+    expect(game.currentPlayer!.id).toBe("p1");
   });
 });
 

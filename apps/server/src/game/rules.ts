@@ -17,3 +17,13 @@ export function canPlay(
   }
   return card.type === top.type;
 }
+
+/**
+ * A única resposta possível a uma compra pendente, nas mesas que empilham: uma
+ * carta do mesmo tipo da que abriu a pilha — +2 sobre +2, +4 sobre +4, nunca
+ * cruzado, e a cor não importa. Quem abriu a pilha é sempre a carta do topo,
+ * então não há o que guardar: com compra pendente ela é o +2/+4 mais recente.
+ */
+export const canStack = (card: Card, top: Card) =>
+  card.type === top.type &&
+  (card.type === "draw-two" || card.type === "wild-draw-four");

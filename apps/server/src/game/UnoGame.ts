@@ -1,4 +1,6 @@
 import {
+  COLOR_NAME,
+  DEFAULT_RULES,
   INITIAL_HAND_SIZE,
   MIN_PLAYERS,
   PLAY_COLORS,
@@ -9,10 +11,11 @@ import {
   type Card,
   type FxEvent,
   type GamePhase,
+  type HouseRules,
   type PlayColor,
 } from "@uno/shared";
 import { createDeck, shuffle } from "./deck.js";
-import { canPlay } from "./rules.js";
+import { canPlay, canStack } from "./rules.js";
 
 /** Rejected player action. The room turns these into a message for that client. */
 export class GameError extends Error {}
@@ -27,6 +30,8 @@ export type GamePlayer = {
 const LOG_SIZE = 12;
 
 export class UnoGame {
+  /** O combinado da mesa. A sala escreve uma vez, ao criar; a partida só lê. */
+  rules: HouseRules = { ...DEFAULT_RULES };
   players: GamePlayer[] = [];
   deck: Card[] = [];
   discard: Card[] = [];
@@ -110,16 +115,28 @@ export class UnoGame {
     if (wasCurrent) this.pendingDraw = 0;
   }
 
-  start() {
-    if (this.phase === "playing") throw new GameError("A partida já começou.");
-    if (this.players.length < MIN_PLAYERS) {
-      throw new GameError(`São necessários pelo menos ${MIN_PLAYERS} jogadores.`);
-    }
+  /**
+   * Quem começa, tirado no sorteio. Fica separado do `start` porque a mesa
+   * precisa do nome ANTES de a partida existir: é ele que a roleta gira até
+   * parar, e só quando ela para é que as cartas são repartidas.
+   */
+  draftStarter(): string {
+    this.requireStartable();
+    return this.players[Math.floor(this.random() * this.players.length)].id;
+  }
 
+  /**
+   * `starterId` é o sorteado. Sem ele — ou se ele saiu enquanto a roleta girava
+   * — começa o primeiro assento, que é como a partida sempre começou.
+   */
+  start(starterId?: string) {
+    this.requireStartable();
+
+    const drafted = this.players.findIndex((p) => p.id === starterId);
     this.deck = shuffle(createDeck(), this.random);
     this.discard = [];
     this.direction = 1;
-    this.currentIndex = 0;
+    this.currentIndex = drafted === -1 ? 0 : drafted;
     this.pendingDraw = 0;
     this.drawnCardId = null;
     this.vulnerableId = "";
@@ -134,6 +151,10 @@ export class UnoGame {
       this.fx.push({ k: "deal", to: player.id, n: player.hand.length });
     }
 
+    // Antes da carta inicial: o log conta a partida na ordem em que ela
+    // aconteceu, e o sorteio veio primeiro.
+    this.pushLog(`Sorteio: ${this.currentPlayer!.name} começa a partida.`);
+
     this.discard.push(this.drawStartingCard());
     this.fx.push({ k: "flip" });
     this.currentColor = this.topCard!.color as PlayColor;
@@ -143,9 +164,6 @@ export class UnoGame {
 
   playCard(playerId: string, cardId: string, chosenColor?: PlayColor) {
     const player = this.requireTurn(playerId);
-    if (this.pendingDraw > 0) {
-      throw new GameError(`Você precisa comprar ${this.pendingDraw} cartas.`);
-    }
     if (this.drawnCardId !== null && this.drawnCardId !== cardId) {
       throw new GameError("Você já comprou: jogue a carta comprada ou passe.");
     }
@@ -154,8 +172,12 @@ export class UnoGame {
     if (index === -1) throw new GameError("Você não tem essa carta.");
 
     const card = player.hand[index];
-    if (!canPlay(card, this.topCard!, this.currentColor)) {
-      throw new GameError("Essa carta não combina com o descarte.");
+    if (!this.isLegal(card)) {
+      throw new GameError(
+        this.pendingDraw > 0
+          ? `Você precisa comprar ${this.pendingDraw} cartas.`
+          : "Essa carta não combina com o descarte.",
+      );
     }
     if (isWild(card) && !PLAY_COLORS.includes(chosenColor as PlayColor)) {
       throw new GameError("Escolha uma cor válida.");
@@ -166,7 +188,10 @@ export class UnoGame {
     this.discard.push(card);
     this.fx.push({ k: "play", by: player.id });
     this.currentColor = isWild(card) ? chosenColor! : (card.color as PlayColor);
-    this.pushLog(`${player.name} jogou ${cardLabel(card)}.`);
+    // A cor do coringa não está na carta: sem dizê-la aqui, o log conta que
+    // alguém jogou um coringa e não conta o que a mesa virou.
+    const chose = isWild(card) ? ` e escolheu ${COLOR_NAME[this.currentColor]}` : "";
+    this.pushLog(`${player.name} jogou ${cardLabel(card)}${chose}.`);
 
     if (player.hand.length === 0) {
       this.phase = "finished";
@@ -203,35 +228,49 @@ export class UnoGame {
       throw new GameError("Você já comprou nesta rodada.");
     }
     // Comprar é o que se faz na falta de jogada, não uma alternativa a ela.
-    if (player.hand.some((c) => canPlay(c, this.topCard!, this.currentColor))) {
+    if (player.hand.some((c) => this.isLegal(c))) {
       throw new GameError("Você tem carta jogável: só compre quando não puder jogar.");
     }
 
-    const [card] = this.take(1);
-    if (!card) {
+    // Uma carta, ou até vir uma que sirva. A busca sempre termina: o monte é
+    // finito e o descarte só se recicla enquanto tiver o que reciclar.
+    const taken: Card[] = [];
+    for (;;) {
+      const [card] = this.take(1);
+      if (!card) break;
+      taken.push(card);
+      player.hand.push(card);
+      if (this.isLegal(card)) {
+        this.drawnCardId = card.id;
+        break;
+      }
+      if (!this.rules.drawUntilPlayable) break;
+    }
+
+    if (taken.length === 0) {
       this.pushLog("Não há cartas para comprar.");
       this.endTurn();
       return;
     }
 
-    player.hand.push(card);
-    this.fx.push({ k: "draw", to: player.id, n: 1 });
+    this.fx.push({ k: "draw", to: player.id, n: taken.length });
     player.calledUno = false;
-    this.pushLog(`${player.name} comprou uma carta.`);
+    this.pushLog(
+      taken.length === 1
+        ? `${player.name} comprou uma carta.`
+        : `${player.name} comprou ${taken.length} até achar uma jogável.`,
+    );
 
-    if (canPlay(card, this.topCard!, this.currentColor)) {
-      this.drawnCardId = card.id;
-    } else {
-      this.endTurn();
-    }
+    if (this.drawnCardId === null) this.endTurn();
   }
 
   /** Give up the turn after drawing an unplayed card. */
   pass(playerId: string) {
-    this.requireTurn(playerId);
+    const player = this.requireTurn(playerId);
     if (this.drawnCardId === null) {
       throw new GameError("Você só pode passar depois de comprar.");
     }
+    this.pushLog(`${player.name} passou a vez.`);
     this.endTurn();
   }
 
@@ -280,14 +319,33 @@ export class UnoGame {
     if (!player) return [];
     if (this.phase !== "playing") return [];
     if (this.currentPlayer?.id !== playerId) return [];
-    if (this.pendingDraw > 0) return [];
     if (this.drawnCardId !== null) {
       return player.hand.filter((c) => c.id === this.drawnCardId);
     }
-    return player.hand.filter((c) => canPlay(c, this.topCard!, this.currentColor));
+    return player.hand.filter((c) => this.isLegal(c));
   }
 
   /* --------------------------------------------------------------- private */
+
+  /**
+   * Com compra pendente a mesa fecha: ou se empilha, ou se compra. Fora dela
+   * vale a regra normal do descarte — e numa mesa que não empilha nada é legal
+   * enquanto a compra estiver de pé, que é como o jogo sempre funcionou.
+   */
+  private isLegal(card: Card): boolean {
+    if (this.pendingDraw > 0) {
+      return this.rules.stacking && canStack(card, this.topCard!);
+    }
+    return canPlay(card, this.topCard!, this.currentColor);
+  }
+
+  /** As duas condições para haver partida. O sorteio as cobra tanto quanto o começo. */
+  private requireStartable() {
+    if (this.phase === "playing") throw new GameError("A partida já começou.");
+    if (this.players.length < MIN_PLAYERS) {
+      throw new GameError(`São necessários pelo menos ${MIN_PLAYERS} jogadores.`);
+    }
+  }
 
   private requireTurn(playerId: string): GamePlayer {
     if (this.phase !== "playing") throw new GameError("A partida não está em andamento.");
@@ -341,17 +399,28 @@ export class UnoGame {
         }
         break;
       case "draw-two":
-        this.pendingDraw = 2;
-        this.advance();
+        this.stack(2);
         break;
       case "wild-draw-four":
-        this.pendingDraw = 4;
-        this.advance();
+        this.stack(4);
         break;
       default:
         this.advance();
         break;
     }
+  }
+
+  /**
+   * Soma, e não atribui: numa mesa que não empilha o pendente é sempre zero
+   * quando um +2/+4 é baixado, então a soma dá no mesmo. Empilhando, é o
+   * acumulado crescendo até alguém não ter resposta.
+   */
+  private stack(amount: number) {
+    this.pendingDraw += amount;
+    if (this.pendingDraw > amount) {
+      this.pushLog(`A compra acumulada subiu para ${this.pendingDraw}.`);
+    }
+    this.advance();
   }
 
   private endTurn() {

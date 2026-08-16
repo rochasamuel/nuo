@@ -30,6 +30,8 @@ export type RoomConnection = {
   playableIds: Set<string>;
   sessionId: string;
   join: (playerName: string) => Promise<void>;
+  /** Tenta voltar para a mesa depois de o lugar ter sido perdido. */
+  retry: () => void;
   leave: () => void;
   actions: RoomActions;
   /**
@@ -54,6 +56,9 @@ export type RoomActions = {
 export function useRoomConnection(code: string): RoomConnection {
   const roomRef = useRef<Room | null>(null);
   const fxHandlers = useRef(new Set<(events: FxEvent[]) => void>());
+  /** Uma tentativa de cada vez, e nenhuma depois que a tela sai. */
+  const busy = useRef(false);
+  const alive = useRef(true);
   const [status, setStatus] = useState<ConnectionStatus>("connecting");
   const [dropped, setDropped] = useState(false);
   const [error, setError] = useState("");
@@ -97,6 +102,7 @@ export function useRoomConnection(code: string): RoomConnection {
       setError("");
       try {
         const room = await client.joinById(code, { playerName } satisfies JoinRoomOptions);
+        if (!alive.current) return void room.leave();
         attach(room, playerName);
       } catch (cause) {
         clearSession(code);
@@ -107,38 +113,91 @@ export function useRoomConnection(code: string): RoomConnection {
     [attach, code],
   );
 
-  useEffect(() => {
-    let cancelled = false;
+  /**
+   * O caminho de volta para a mesa, em ordem de preferência: a sala que a tela
+   * inicial já abriu, o token que guarda o lugar, e por fim uma entrada nova
+   * pelo nome. Serve tanto para a primeira vez quanto para a volta depois de o
+   * celular congelar a aba — é o mesmo caminho, e a única diferença é que na
+   * volta já existe um token para gastar.
+   */
+  const connect = useCallback(async () => {
+    if (roomRef.current || busy.current || !alive.current) return;
+    busy.current = true;
+    const saved = loadSession(code);
 
-    (async () => {
-      const saved = loadSession(code);
-
+    try {
       const handedOver = takePendingRoom(code);
       if (handedOver) return attach(handedOver, saved?.playerName ?? loadPlayerName());
+
+      const name = saved?.playerName || loadPlayerName();
+      // Sem token e sem nome não há o que tentar: quem chega assim vem do link
+      // de convite e precisa se apresentar primeiro.
+      if (!saved?.reconnectionToken && !name) return setStatus("naming");
+
+      setStatus("connecting");
+      setError("");
 
       if (saved?.reconnectionToken) {
         try {
           const room = await client.reconnect(saved.reconnectionToken);
-          if (cancelled) return room.leave();
+          if (!alive.current) return void room.leave();
           return attach(room, saved.playerName);
         } catch {
           clearSession(code);
-          if (cancelled) return;
+          if (!alive.current) return;
         }
       }
 
-      const name = saved?.playerName || loadPlayerName();
       if (!name) return setStatus("naming");
-      if (!cancelled) await join(name);
-    })();
+
+      try {
+        const room = await client.joinById(code, { playerName: name } satisfies JoinRoomOptions);
+        if (!alive.current) return void room.leave();
+        attach(room, name);
+      } catch (cause) {
+        if (!alive.current) return;
+        setError(joinError(cause));
+        // Quem nunca sentou precisa do formulário de nome; quem já estava na
+        // mesa precisa do motivo e de um botão para tentar de novo.
+        setStatus(saved ? "lost" : "naming");
+      }
+    } finally {
+      busy.current = false;
+    }
+  }, [attach, code]);
+
+  useEffect(() => {
+    alive.current = true;
+    void connect();
 
     return () => {
-      cancelled = true;
+      alive.current = false;
       roomRef.current?.removeAllListeners();
       roomRef.current?.leave();
       roomRef.current = null;
     };
-  }, [attach, code, join]);
+  }, [connect]);
+
+  /**
+   * Trocar de app para mandar o link é o jeito normal de convidar alguém, e o
+   * celular responde congelando a aba: o socket morre e o SDK gasta as
+   * tentativas dele no vazio. Voltar para a aba é o sinal de que dá para tentar
+   * de novo — e é aqui, não num botão, que a mesa precisa se recuperar sozinha.
+   */
+  useEffect(() => {
+    const recover = () => {
+      if (document.visibilityState !== "visible") return;
+      void connect();
+    };
+    document.addEventListener("visibilitychange", recover);
+    addEventListener("online", recover);
+    addEventListener("pageshow", recover);
+    return () => {
+      document.removeEventListener("visibilitychange", recover);
+      removeEventListener("online", recover);
+      removeEventListener("pageshow", recover);
+    };
+  }, [connect]);
 
   useEffect(() => {
     if (!notice) return;
@@ -146,8 +205,11 @@ export function useRoomConnection(code: string): RoomConnection {
     return () => clearTimeout(timer);
   }, [notice]);
 
+  const retry = useCallback(() => void connect(), [connect]);
+
   const leave = useCallback(() => {
     roomRef.current?.leave(true);
+    roomRef.current = null;
     clearSession(code);
   }, [code]);
 
@@ -182,6 +244,7 @@ export function useRoomConnection(code: string): RoomConnection {
     playableIds,
     sessionId,
     join,
+    retry,
     leave,
     actions,
     onFx,

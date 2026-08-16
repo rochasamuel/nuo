@@ -2,9 +2,12 @@ import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import {
   DEFAULT_MAX_PLAYERS,
+  DEFAULT_RULES,
   MAX_PLAYERS,
   MIN_PLAYERS,
+  RULES,
   type CreateRoomOptions,
+  type HouseRules,
 } from "@uno/shared";
 import { BACK_URL } from "../lib/cards";
 import { ROOM_NAME, client } from "../lib/colyseus";
@@ -18,6 +21,7 @@ export function HomeScreen() {
   const setPlayerName = useUi((ui) => ui.setPlayerName);
   const [roomName, setRoomName] = useState("Sexta-feira UNO");
   const [maxPlayers, setMaxPlayers] = useState(DEFAULT_MAX_PLAYERS);
+  const [rules, setRules] = useState<HouseRules>(DEFAULT_RULES);
   const [code, setCode] = useState("");
 
   const createRoom = useMutation({
@@ -48,7 +52,7 @@ export function HomeScreen() {
         className="px-slab flex flex-col gap-4 p-5"
         onSubmit={(event) => {
           event.preventDefault();
-          createRoom.mutate({ roomName, playerName, maxPlayers });
+          createRoom.mutate({ roomName, playerName, maxPlayers, rules });
         }}
       >
         <h1 className="px-title">Abrir uma mesa</h1>
@@ -86,6 +90,33 @@ export function HomeScreen() {
             style={{ accentColor: "var(--mark)" }}
           />
         </label>
+
+        {/* O que se combina antes de repartir. Vale para a mesa inteira e não
+            muda depois, então é aqui — e não no lobby — que se decide. */}
+        <fieldset className="flex flex-col gap-2">
+          <legend className="px-label mb-2">Regras da casa</legend>
+          {RULES.map(({ key, label, hint }) => (
+            <label key={key} className="flex cursor-pointer items-start gap-2">
+              <input
+                type="checkbox"
+                checked={rules[key]}
+                onChange={(event) =>
+                  setRules((current) => ({ ...current, [key]: event.target.checked }))
+                }
+                className="mt-1 size-4 shrink-0"
+                style={{ accentColor: "var(--mark)" }}
+              />
+              <span className="flex flex-col">
+                <span className="text-sm" style={{ color: "var(--paper-hi)" }}>
+                  {label}
+                </span>
+                <span className="text-xs" style={{ color: "var(--paper-sh)" }}>
+                  {hint}
+                </span>
+              </span>
+            </label>
+          ))}
+        </fieldset>
 
         <button
           type="submit"

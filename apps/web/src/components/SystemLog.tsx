@@ -1,3 +1,15 @@
+import { COLOR_NAME, PLAY_COLORS } from "@uno/shared";
+import { COLOR_HEX } from "../lib/cards";
+
+/**
+ * Toda linha do log fala de cartas, e carta se identifica pela cor: "2 azul",
+ * "bloqueio vermelho", "escolheu verde". Pintar a palavra é o que deixa a
+ * história legível de relance — o log continua sendo texto puro no servidor, e
+ * é aqui, na leitura, que a cor volta a existir.
+ */
+const HEX_BY_NAME = new Map(PLAY_COLORS.map((color) => [COLOR_NAME[color], COLOR_HEX[color]]));
+const COLOR_WORD = new RegExp(`(${[...HEX_BY_NAME.keys()].join("|")})`, "g");
+
 export function SystemLog({ messages }: { messages: string[] }) {
   return (
     <div className="px-slab hidden w-64 flex-col gap-2 p-3 md:flex">
@@ -9,10 +21,24 @@ export function SystemLog({ messages }: { messages: string[] }) {
         {[...messages].reverse().map((message, index) => (
           <li key={`${messages.length - index}-${message}`}>
             {index === 0 && <span className="px-caret" style={{ color: "var(--mark)" }}>▌</span>}
-            {message}
+            {paint(message)}
           </li>
         ))}
       </ul>
     </div>
   );
+}
+
+/** O `split` com grupo devolve os pedaços e as cores intercalados, nesta ordem. */
+function paint(message: string) {
+  return message.split(COLOR_WORD).map((part, index) => {
+    const hex = HEX_BY_NAME.get(part);
+    return hex ? (
+      <b key={index} style={{ color: hex }}>
+        {part}
+      </b>
+    ) : (
+      part
+    );
+  });
 }
