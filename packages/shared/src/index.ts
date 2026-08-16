@@ -31,7 +31,7 @@ export const UNO_PENALTY = 2;
  * Sem ela a corrida é injusta: o "Pegar" nasce debaixo do cursor de quem já está
  * esperando, enquanto quem tem que gritar ainda precisa reagir e mirar.
  */
-export const UNO_GRACE = 2000;
+export const UNO_GRACE = 50;
 /** Seconds a dropped player keeps their seat before the room gives up on them. */
 export const RECONNECT_TIMEOUT = 60;
 
