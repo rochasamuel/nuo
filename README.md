@@ -64,6 +64,13 @@ Em produção o servidor roda com `pnpm --filter server start` (a partir de
 `apps/server/build`). O endpoint usado pelo front sai de `VITE_SERVER_URL`, com
 `http://<host>:2567` como padrão.
 
+`@uno/shared` é compilado (os apps importam `dist/`, não `src/`), e `dist/` não
+vai para o git. Por isso o `build` de cada app compila o pacote compartilhado
+antes de compilar a si mesmo: num container recém-clonado, `pnpm --filter server
+build` sozinho não teria os tipos e falharia com `Cannot find module
+'@uno/shared'`. Compilar duas vezes custa um segundo; descobrir isso no deploy
+custa mais.
+
 ## Estrutura
 
 ```

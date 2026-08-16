@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "node build/index.js",
-    "build": "tsc -p tsconfig.build.json",
+    "build": "pnpm --filter @uno/shared build && tsc -p tsconfig.build.json",
     "test": "vitest run"
   },
   "dependencies": {
