@@ -47,6 +47,7 @@ export function RoomScreen({ code }: { code: string }) {
           playableIds={connection.playableIds}
           actions={connection.actions}
           onFx={connection.onFx}
+          onEmote={connection.onEmote}
           onExit={exit}
         />
       )}

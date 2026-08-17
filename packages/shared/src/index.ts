@@ -113,6 +113,54 @@ export const RULES: { key: keyof HouseRules; label: string; hint: string }[] = [
   },
 ];
 
+/* ------------------------------------------------------------ conversa */
+
+/**
+ * O vocabulário da mesa. É fechado de propósito: com ele não se ofende, não se
+ * combina jogada por fora e não se digita nada em partida — cada emoji é uma
+ * frase inteira. A lista é a mesma dos dois lados, e o servidor só aceita o que
+ * está aqui; um emoji novo é uma linha neste array e mais nada.
+ *
+ * A ordem é a da grade na tela, lida da esquerda para a direita: primeiro o que
+ * se diz sobre a jogada dos outros, depois o que se diz sobre a própria.
+ */
+export const EMOTES = [
+  "😂",
+  "😱",
+  "😡",
+  "😭",
+  "👏",
+  "👍",
+  "👎",
+  "🤔",
+  "😎",
+  "🙏",
+] as const;
+
+export type Emote = (typeof EMOTES)[number];
+
+export const isEmote = (value: unknown): value is Emote =>
+  EMOTES.includes(value as Emote);
+
+/**
+ * Quanto tempo, em ms, um jogador espera entre dois emojis.
+ *
+ * Não é moderação, é ritmo: sem isto a mesa vira metralhadora de balões e a
+ * conversa deixa de ser legível justamente para quem está tentando jogar. Um
+ * segundo e meio deixa reagir a uma jogada e ainda emendar um segundo emoji,
+ * mas não deixa segurar o botão.
+ */
+export const EMOTE_COOLDOWN = 1500;
+
+/**
+ * Quanto tempo, em ms, o balão fica na tela antes de sumir sozinho.
+ *
+ * Um emoji é um instante, não uma situação: ele acompanha a jogada que
+ * comentou e vai embora com ela. Três segundos é o que alguém do outro lado da
+ * mesa leva para olhar para cima, ler e voltar para a própria mão.
+ */
+export const EMOTE_LINGER = 3000;
+
 export const isWild = (card: Card) =>
   card.type === "wild" || card.type === "wild-draw-four";
 
@@ -230,6 +278,7 @@ export type JoinRoomOptions = {
 /** client -> server */
 export type PlayMessage = { cardId: string; color?: PlayColor };
 export type CatchMessage = { targetId: string };
+export type EmoteMessage = { emote: Emote };
 
 /** server -> client, private to a single player */
 export type HandMessage = { cards: Card[]; playableIds: string[] };
@@ -265,3 +314,13 @@ export type FxEvent =
 
 /** server -> client, broadcast. Vem antes do patch de estado correspondente. */
 export type FxMessage = FxEvent[];
+
+/**
+ * server -> client, broadcast. Quem falou e o que disse.
+ *
+ * Fora do estado sincronizado pelo mesmo motivo dos eventos de `fx`: um emoji
+ * é o que ACONTECEU, e some sozinho. No schema ele obrigaria a mesa inteira a
+ * receber um patch para pôr o balão e outro para tirá-lo — e ainda ressuscitaria
+ * na tela de quem entrasse depois, comentando uma jogada que já passou.
+ */
+export type EmoteEvent = { by: string; emote: Emote };

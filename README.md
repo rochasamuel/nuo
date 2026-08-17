@@ -29,6 +29,11 @@ sistema. **A mão de um jogador nunca entra no estado sincronizado** — ela vai
 numa mensagem `hand` endereçada só ao dono, junto da lista de cartas que ele pode
 jogar agora. Quem decide o que é jogável é o servidor; a UI apenas obedece.
 
+Fora do estado sincronizado ficam também os **instantes**: os eventos `fx`, que
+as animações usam, e a conversa da mesa (`emote`), um emoji de uma lista fechada
+que aparece por três segundos abaixo de quem falou. Nenhum dos dois é situação —
+guardá-los no estado os faria ressuscitar na tela de quem entrasse depois.
+
 ## Requisitos
 
 - Node.js >= 20.9

@@ -1,7 +1,15 @@
 import { useCallback } from "react";
 import { useUi } from "../store/ui";
 
-export type SoundName = "draw" | "play" | "action" | "turn" | "uno" | "slap" | "victory";
+export type SoundName =
+  | "draw"
+  | "play"
+  | "action"
+  | "turn"
+  | "uno"
+  | "slap"
+  | "victory"
+  | "bubble";
 
 /** Drop an mp3 named after the effect into `public/sounds/` and it starts playing. */
 const cache = new Map<SoundName, HTMLAudioElement>();

@@ -2,11 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import { COLOR_NAME, isWild, type Card, type PlayColor, type TableState } from "@uno/shared";
 import type { RoomActions, RoomConnection } from "../game/useRoomConnection";
 import { flyPlay, handCardPose, markLeaving, type Pose } from "../game/flights";
+import { useEmotes } from "../game/useEmotes";
 import { artUrl, COLOR_HEX, scatter } from "../lib/cards";
 import { useSound } from "../lib/sound";
 import { useUi } from "../store/ui";
 import { DiscardPile } from "./DiscardPile";
 import { DrawPile } from "./DrawPile";
+import { EmoteBubble } from "./EmoteBubble";
+import { EmotePicker } from "./EmotePicker";
 import { Hand } from "./Hand";
 import { PlayerSeat } from "./PlayerSeat";
 import { RulesMenu } from "./RulesMenu";
@@ -25,11 +28,22 @@ type Props = {
    * de mentira do /mock não tem sala atrás dela.
    */
   onFx?: RoomConnection["onFx"];
+  /** A conversa da mesa. Opcional pelo mesmo motivo que `onFx`. */
+  onEmote?: RoomConnection["onEmote"];
   /** Deixa a mesa e volta para a tela inicial. */
   onExit: () => void;
 };
 
-export function Table({ state, sessionId, hand, playableIds, actions, onFx, onExit }: Props) {
+export function Table({
+  state,
+  sessionId,
+  hand,
+  playableIds,
+  actions,
+  onFx,
+  onEmote,
+  onExit,
+}: Props) {
   const discardRef = useRef<HTMLDivElement>(null);
   const [dropArmed, setDropArmed] = useState(false);
   const [pendingWild, setPendingWild] = useState<string | null>(null);
@@ -39,6 +53,7 @@ export function Table({ state, sessionId, hand, playableIds, actions, onFx, onEx
   const playSound = useSound();
   useTableSounds(state, sessionId, hand.length);
   useSlapSound(sessionId, onFx);
+  const bubbles = useEmotes(onEmote);
 
   /*
    * O seu tapa soa no clique, sem esperar o servidor confirmar — a mesma
@@ -153,6 +168,7 @@ export function Table({ state, sessionId, hand, playableIds, actions, onFx, onEx
               player.id !== sessionId
             }
             onCatch={() => actions.catchUno(player.id)}
+            bubble={bubbles[player.id]}
           />
         ))}
       </section>
@@ -206,7 +222,20 @@ export function Table({ state, sessionId, hand, playableIds, actions, onFx, onEx
           <SystemLog messages={state.log} />
         </div>
 
-        <div className="flex min-h-9 flex-wrap items-center justify-center gap-3">
+        <div className="relative flex min-h-9 flex-wrap items-center justify-center gap-3">
+          {/* O seu balão nasce aqui porque você não tem assento: a fileira de
+              ações é o seu lugar na mesa, e o balão pende dela para cima como o
+              dos outros pende do assento deles. Absoluto pelo mesmo motivo —
+              nada se move quando ele vai e vem. */}
+          {bubbles[sessionId] && (
+            <span className="absolute bottom-full left-1/2 z-20 -translate-x-1/2 pb-1">
+              <EmoteBubble
+                key={bubbles[sessionId].seq}
+                emote={bubbles[sessionId].emote}
+              />
+            </span>
+          )}
+
           {slapping && (
             <span className="px-label" style={{ color: "var(--mark)" }}>
               {slap?.mine ? "Tapa no 9! Bata na carta · " : "Tapa no 9 · "}
@@ -245,6 +274,11 @@ export function Table({ state, sessionId, hand, playableIds, actions, onFx, onEx
           >
             UNO!
           </button>
+
+          {/* Falar vale sempre: fora da sua vez, com a mesa congelada pelo tapa
+              e depois de a partida acabar. É a única coisa na mesa que nunca
+              depende de estado nenhum. */}
+          <EmotePicker onSend={actions.emote} />
         </div>
 
         <Hand

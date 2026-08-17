@@ -1,6 +1,8 @@
 import type { PublicPlayer } from "@uno/shared";
 import { anchorRef, heldSeatCount, useFlightStore } from "../game/flights";
+import type { Bubble } from "../game/useEmotes";
 import { BACK_URL } from "../lib/cards";
+import { EmoteBubble } from "./EmoteBubble";
 
 type Props = {
   player: PublicPlayer;
@@ -9,9 +11,11 @@ type Props = {
   /** Este jogador esqueceu o UNO e a carência já passou: dá para pegá-lo agora. */
   catchable: boolean;
   onCatch: () => void;
+  /** O que ele está dizendo agora, enquanto o balão dura. */
+  bubble?: Bubble;
 };
 
-export function PlayerSeat({ player, active, isHost, catchable, onCatch }: Props) {
+export function PlayerSeat({ player, active, isHost, catchable, onCatch, bubble }: Props) {
   // O contador só sobe quando a carta pousa: vê-lo mudar antes de a carta
   // chegar entrega que o número e o desenho são duas coisas separadas.
   const airborne = useFlightStore(heldSeatCount(player.id));
@@ -58,6 +62,16 @@ export function PlayerSeat({ player, active, isHost, catchable, onCatch }: Props
         >
           Pegar
         </button>
+      )}
+
+      {/* Pendurado no assento, e não empilhado dentro dele: os balões vão e
+          vêm a cada poucos segundos, e no fluxo normal cada um deles esticaria
+          o assento e sacudiria a fileira inteira. A chave é o `seq`, para o
+          mesmo emoji repetido saltar de novo em vez de ficar parado. */}
+      {bubble && (
+        <span className="absolute top-full left-1/2 z-20 -translate-x-1/2 pt-1">
+          <EmoteBubble key={bubble.seq} emote={bubble.emote} />
+        </span>
       )}
     </div>
   );

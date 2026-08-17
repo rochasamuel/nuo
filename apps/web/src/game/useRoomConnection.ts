@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Room } from "@colyseus/sdk";
 import type {
   Card,
+  Emote,
+  EmoteEvent,
+  EmoteMessage,
   ErrorMessage,
   FxEvent,
   FxMessage,
@@ -41,6 +44,8 @@ export type RoomConnection = {
    * receber. Devolve a função que cancela a assinatura.
    */
   onFx: (handler: (events: FxEvent[]) => void) => () => void;
+  /** Assina a conversa da mesa, pelo mesmo motivo e do mesmo jeito que `onFx`. */
+  onEmote: (handler: (event: EmoteEvent) => void) => () => void;
 };
 
 export type RoomActions = {
@@ -52,12 +57,15 @@ export type RoomActions = {
   catchUno: (targetId: string) => void;
   /** Bater no 9 que está no topo do descarte. */
   slap: () => void;
+  /** Falar com a mesa. Vale em qualquer momento, inclusive fora da sua vez. */
+  emote: (emote: Emote) => void;
   restart: () => void;
 };
 
 export function useRoomConnection(code: string): RoomConnection {
   const roomRef = useRef<Room | null>(null);
   const fxHandlers = useRef(new Set<(events: FxEvent[]) => void>());
+  const emoteHandlers = useRef(new Set<(event: EmoteEvent) => void>());
   /** Uma tentativa de cada vez, e nenhuma depois que a tela sai. */
   const busy = useRef(false);
   const alive = useRef(true);
@@ -83,6 +91,9 @@ export function useRoomConnection(code: string): RoomConnection {
       room.onMessage("error", (message: ErrorMessage) => setNotice(message.message));
       room.onMessage("fx", (events: FxMessage) => {
         for (const handler of fxHandlers.current) handler(events);
+      });
+      room.onMessage("emote", (event: EmoteEvent) => {
+        for (const handler of emoteHandlers.current) handler(event);
       });
       room.onDrop(() => setDropped(true));
       room.onReconnect(() => {
@@ -224,6 +235,7 @@ export function useRoomConnection(code: string): RoomConnection {
       callUno: () => roomRef.current?.send("uno"),
       catchUno: (targetId) => roomRef.current?.send("catch", { targetId }),
       slap: () => roomRef.current?.send("slap"),
+      emote: (emote) => roomRef.current?.send("emote", { emote } satisfies EmoteMessage),
       restart: () => roomRef.current?.send("restart"),
     }),
     [],
@@ -231,6 +243,12 @@ export function useRoomConnection(code: string): RoomConnection {
 
   const onFx = useCallback((handler: (events: FxEvent[]) => void) => {
     const handlers = fxHandlers.current;
+    handlers.add(handler);
+    return () => handlers.delete(handler);
+  }, []);
+
+  const onEmote = useCallback((handler: (event: EmoteEvent) => void) => {
+    const handlers = emoteHandlers.current;
     handlers.add(handler);
     return () => handlers.delete(handler);
   }, []);
@@ -251,6 +269,7 @@ export function useRoomConnection(code: string): RoomConnection {
     leave,
     actions,
     onFx,
+    onEmote,
   };
 }
 

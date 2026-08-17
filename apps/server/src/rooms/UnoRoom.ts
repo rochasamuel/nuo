@@ -1,6 +1,8 @@
 import { Room, type Client, type CloseCode } from "colyseus";
 import {
   DEFAULT_MAX_PLAYERS,
+  EMOTE_COOLDOWN,
+  isEmote,
   LOBBY_RECONNECT_TIMEOUT,
   MAX_PLAYERS,
   MIN_PLAYERS,
@@ -11,6 +13,8 @@ import {
   UNO_GRACE,
   type CatchMessage,
   type CreateRoomOptions,
+  type EmoteEvent,
+  type EmoteMessage,
   type ErrorMessage,
   type FxMessage,
   type HandMessage,
@@ -38,6 +42,8 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
   private starterTimer?: { clear: () => void };
   /** A rede de segurança do tapa no 9. Existe enquanto a corrida está aberta. */
   private slapTimer?: { clear: () => void };
+  /** Quando cada jogador falou pela última vez, para o intervalo entre emojis. */
+  private lastEmote = new Map<string, number>();
 
   messages = {
     start: (client: Client) => this.act(client, () => this.draft(client)),
@@ -65,6 +71,28 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
     slap: (client: Client) => this.act(client, () =>
       this.game.slap(client.sessionId),
     ),
+
+    /**
+     * A conversa da mesa. Não passa pelo `act` porque não é jogada: não muda
+     * estado nenhum, não pode ser recusada com um aviso e não pede `sync` —
+     * sai direto para todo mundo, inclusive de volta para quem falou, que é o
+     * que confirma o envio na tela dele.
+     *
+     * Fora do intervalo o emoji é engolido em silêncio, e de propósito: quem
+     * apertou rápido demais não cometeu erro nenhum, e um aviso vermelho por
+     * isso seria mais barulhento que a mensagem que ele está impedindo.
+     */
+    emote: (client: Client, message: EmoteMessage) => {
+      if (!isEmote(message?.emote)) return;
+      const now = this.clock.currentTime;
+      const last = this.lastEmote.get(client.sessionId) ?? -Infinity;
+      if (now - last < EMOTE_COOLDOWN) return;
+      this.lastEmote.set(client.sessionId, now);
+      this.broadcast("emote", {
+        by: client.sessionId,
+        emote: message.emote,
+      } satisfies EmoteEvent);
+    },
 
     restart: (client: Client) => this.act(client, () => {
       this.requireHost(client);
@@ -118,6 +146,7 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
 
   onLeave(client: Client, _code: CloseCode) {
     this.connected.delete(client.sessionId);
+    this.lastEmote.delete(client.sessionId);
     this.game.removePlayer(client.sessionId);
     if (this.state.hostId === client.sessionId) {
       this.state.hostId = this.game.players[0]?.id ?? "";

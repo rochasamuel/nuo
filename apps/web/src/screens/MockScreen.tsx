@@ -1,9 +1,10 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   PLAY_COLORS,
   STARTER_SPIN,
   type Card,
   type CardType,
+  type EmoteEvent,
   type PlayColor,
   type PublicCard,
   type PublicPlayer,
@@ -160,6 +161,18 @@ export function MockScreen() {
   );
 
   /*
+   * Sem sala, a conversa é um eco local: o emoji que você manda volta como se o
+   * servidor o tivesse anunciado. É o que permite rever o balão aqui, com a
+   * mesma `Table` e o mesmo `useEmotes` da mesa de verdade.
+   */
+  const emoteHandlers = useRef(new Set<(event: EmoteEvent) => void>());
+  const onEmote = useCallback((handler: (event: EmoteEvent) => void) => {
+    const handlers = emoteHandlers.current;
+    handlers.add(handler);
+    return () => handlers.delete(handler);
+  }, []);
+
+  /*
    * Sem servidor não há eventos `fx`, então aqui os voos são disparados à mão.
    * É o mesmo `flights.ts` do jogo — o que se vê em /mock é o que se vê na
    * mesa de verdade, e é o único jeito de revisar a animação sem abrir dois
@@ -197,6 +210,9 @@ export function MockScreen() {
         if (left.length === 1) flyDraw({ toSeat: left[0], count: 1 });
         return [];
       }),
+    emote: (emote) => {
+      for (const handler of emoteHandlers.current) handler({ by: ME, emote });
+    },
     restart: () => setFinished(false),
   };
 
@@ -232,6 +248,7 @@ export function MockScreen() {
         hand={hand}
         playableIds={playableIds}
         actions={actions}
+        onEmote={onEmote}
         onExit={() => setFinished(false)}
       />
 
