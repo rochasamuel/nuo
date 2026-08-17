@@ -1,8 +1,6 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import {
-  DEFAULT_MAX_PLAYERS,
-  DEFAULT_RULES,
   MAX_PLAYERS,
   MIN_PLAYERS,
   RULES,
@@ -13,15 +11,18 @@ import { BACK_URL } from "../lib/cards";
 import { ROOM_NAME, client } from "../lib/colyseus";
 import { setPendingRoom } from "../lib/pendingRoom";
 import { navigate } from "../lib/router";
-import { saveSession } from "../lib/session";
+import { loadSetup, saveSession, saveSetup } from "../lib/session";
 import { useUi } from "../store/ui";
 
 export function HomeScreen() {
   const playerName = useUi((ui) => ui.playerName);
   const setPlayerName = useUi((ui) => ui.setPlayerName);
-  const [roomName, setRoomName] = useState("Sexta-feira UNO");
-  const [maxPlayers, setMaxPlayers] = useState(DEFAULT_MAX_PLAYERS);
-  const [rules, setRules] = useState<HouseRules>(DEFAULT_RULES);
+  // A mesa nasce como foi a última: quem joga sempre com as mesmas regras não
+  // remarca as mesmas caixas toda semana. Lido uma vez, na montagem.
+  const [setup] = useState(loadSetup);
+  const [roomName, setRoomName] = useState(setup.roomName);
+  const [maxPlayers, setMaxPlayers] = useState(setup.maxPlayers);
+  const [rules, setRules] = useState<HouseRules>(setup.rules);
   const [code, setCode] = useState("");
 
   const createRoom = useMutation({
@@ -30,6 +31,13 @@ export function HomeScreen() {
       saveSession(room.roomId, {
         reconnectionToken: room.reconnectionToken,
         playerName: options.playerName,
+      });
+      // Depois de a sala existir, e não no envio: o que se guarda é um
+      // combinado que deu certo, não uma tentativa.
+      saveSetup({
+        roomName: options.roomName,
+        maxPlayers: options.maxPlayers,
+        rules: options.rules,
       });
       setPendingRoom(room);
       return room.roomId;

@@ -543,6 +543,40 @@ body {
   animation: px-blink 1s steps(1, end) infinite;
 }
 
+/* ---- menu das regras da casa --------------------------------------------
+ * Consulta, não aviso: fica fechado no cabeçalho e abre por cima da mesa sem
+ * empurrar nada — o cabeçalho já se reorganiza sozinho na tela estreita, e um
+ * painel que ocupasse espaço mexeria com a linha inteira ao abrir.
+ * ------------------------------------------------------------------------- */
+
+.uno-rules summary {
+  cursor: pointer;
+  list-style: none;
+}
+/* O triângulo do <details> é do sistema operacional e não do baralho. */
+.uno-rules summary::-webkit-details-marker {
+  display: none;
+}
+.uno-rules[open] summary {
+  color: var(--mark);
+}
+
+/*
+ * O painel pende do CABEÇALHO, e não do resumo: numa tela estreita a barra
+ * quebra em duas linhas e o resumo para no meio dela — preso a ele, o painel
+ * sai pela borda da janela. Preso à barra, ele acompanha a largura da mesa em
+ * qualquer tela. Quem o usa dá o `relative` à barra; ver Table.tsx.
+ */
+.uno-rules-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  /* acima da mesa e da camada de voo (30), abaixo do coringa (40) */
+  z-index: 35;
+  width: max-content;
+  max-width: min(88vw, 340px);
+}
+
 /* ---- roleta do sorteio ---------------------------------------------------
  * A janela é um sulco, como o campo de texto: o nome está DENTRO da chapa, e é
  * isso que faz o rolo parecer uma peça girando atrás dela em vez de um texto

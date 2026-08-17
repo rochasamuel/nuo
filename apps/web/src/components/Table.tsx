@@ -9,6 +9,7 @@ import { DiscardPile } from "./DiscardPile";
 import { DrawPile } from "./DrawPile";
 import { Hand } from "./Hand";
 import { PlayerSeat } from "./PlayerSeat";
+import { RulesMenu } from "./RulesMenu";
 import { StackCounter } from "./StackCounter";
 import { SystemLog } from "./SystemLog";
 import { WildPicker } from "./WildPicker";
@@ -76,7 +77,9 @@ export function Table({ state, sessionId, hand, playableIds, actions, onExit }: 
 
   return (
     <div className="uno-table flex min-h-dvh flex-col gap-3 p-4">
-      <header className="px-slab flex flex-wrap items-center justify-between gap-3 px-4 py-2">
+      {/* `relative` pelo painel do RulesMenu, que pende desta barra e não do
+          próprio botão — ver .uno-rules-panel em index.css. */}
+      <header className="px-slab relative flex flex-wrap items-center justify-between gap-3 px-4 py-2">
         <span className="flex items-baseline gap-2">
           <span className="px-label">{state.roomName}</span>
           <span className="text-sm" style={{ color: "var(--paper-hi)" }}>
@@ -100,6 +103,7 @@ export function Table({ state, sessionId, hand, playableIds, actions, onExit }: 
           <span className="px-label" title="direção">
             {state.direction === 1 ? "↻ horário" : "↺ anti-horário"}
           </span>
+          <RulesMenu rules={state.rules} />
           <button
             type="button"
             onClick={toggleSound}
