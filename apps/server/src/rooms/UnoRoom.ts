@@ -6,6 +6,7 @@ import {
   MIN_PLAYERS,
   RECONNECT_TIMEOUT,
   RULES,
+  SLAP_TIMEOUT,
   STARTER_SPIN,
   UNO_GRACE,
   type CatchMessage,
@@ -35,6 +36,8 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
   private graceTimer?: { clear: () => void };
   /** A volta da roleta em curso. Enquanto existir, a mesa está sorteando. */
   private starterTimer?: { clear: () => void };
+  /** A rede de segurança do tapa no 9. Existe enquanto a corrida está aberta. */
+  private slapTimer?: { clear: () => void };
 
   messages = {
     start: (client: Client) => this.act(client, () => this.draft(client)),
@@ -57,6 +60,10 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
 
     catch: (client: Client, message: CatchMessage) => this.act(client, () =>
       this.game.catchUno(client.sessionId, message?.targetId),
+    ),
+
+    slap: (client: Client) => this.act(client, () =>
+      this.game.slap(client.sessionId),
     ),
 
     restart: (client: Client) => this.act(client, () => {
@@ -194,6 +201,14 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
     state.catchOpen = game.catchOpen;
     state.mustPlayDrawn = game.drawnCardId !== null;
 
+    if (
+      state.slapPending.length !== game.slapPending.length ||
+      game.slapPending.some((id, i) => state.slapPending[i] !== id)
+    ) {
+      state.slapPending.splice(0);
+      state.slapPending.push(...game.slapPending);
+    }
+
     this.syncPlayers();
 
     if (state.discardCount !== game.discard.length) {
@@ -210,6 +225,7 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
     }
 
     this.armCatchWindow();
+    this.armSlapWindow();
     this.sendFx();
     this.sendHands();
   }
@@ -235,6 +251,25 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
     this.graceTimer = undefined;
     if (!this.game.vulnerableId || this.game.catchOpen) return;
     this.graceTimer = this.clock.setTimeout(() => this.sync(), UNO_GRACE);
+  }
+
+  /**
+   * O prazo do tapa. Ele é da RODADA e não de cada batida: rearmá-lo a cada
+   * tapa daria a quem está devendo cinco segundos novos toda vez que outro
+   * batesse, e a mesa travada nunca destravaria.
+   */
+  private armSlapWindow() {
+    if (this.game.slapPending.length === 0) {
+      this.slapTimer?.clear();
+      this.slapTimer = undefined;
+      return;
+    }
+    if (this.slapTimer) return;
+    this.slapTimer = this.clock.setTimeout(() => {
+      this.slapTimer = undefined;
+      this.game.timeoutSlap();
+      this.sync();
+    }, SLAP_TIMEOUT);
   }
 
   private syncPlayers() {

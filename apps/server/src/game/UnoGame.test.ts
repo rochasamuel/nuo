@@ -164,6 +164,118 @@ describe("start", () => {
   });
 });
 
+/*
+ * O tapa no 9 é a única regra que tira o jogo da vez de alguém: enquanto ela
+ * corre, a mesa está congelada e todo mundo age ao mesmo tempo. O que se testa
+ * aqui é o começo, o fim e o que acontece quando a mesa muda no meio.
+ */
+describe("slap the nine", () => {
+  /** Uma mesa com a regra ligada e um 9 na mão de p0, pronto para baixar. */
+  function slapGame(playerCount = 3) {
+    const game = newGame(playerCount);
+    game.rules.slapNine = true;
+    setHand(game, 0, [card("nine", "red", "number", 9), filler()]);
+    return game;
+  }
+
+  it("freezes the table when a nine lands: everyone owes a slap", () => {
+    const game = slapGame();
+    game.playCard("p0", "nine");
+    expect(game.slapPending).toEqual(["p0", "p1", "p2"]);
+    // A vez não andou: quem baixou continua sendo o jogador atual.
+    expect(game.currentPlayer!.id).toBe("p0");
+  });
+
+  it("stays out of the way when the rule is off", () => {
+    const game = newGame(3);
+    setHand(game, 0, [card("nine", "red", "number", 9), filler()]);
+    game.playCard("p0", "nine");
+    expect(game.slapPending).toEqual([]);
+    expect(game.currentPlayer!.id).toBe("p1");
+  });
+
+  it("hands the card to the slowest and lets the turn move on", () => {
+    const game = slapGame();
+    game.playCard("p0", "nine");
+    const before = game.players[1].hand.length;
+
+    game.slap("p2");
+    expect(game.slapPending).toEqual(["p0", "p1"]);
+    game.slap("p0");
+
+    // Sobrou p1: ele compra sem bater em nada, e a rodada acaba aqui.
+    expect(game.slapPending).toEqual([]);
+    expect(game.players[1].hand.length).toBe(before + 1);
+    expect(game.currentPlayer!.id).toBe("p1");
+    expect(game.log.at(-1)).toBe("P1 bateu por último e comprou uma carta.");
+  });
+
+  it("refuses a second slap from the same hand", () => {
+    const game = slapGame();
+    game.playCard("p0", "nine");
+    game.slap("p2");
+    expect(() => game.slap("p2")).toThrow(GameError);
+  });
+
+  it("refuses a slap when no nine is on the table", () => {
+    expect(() => slapGame().slap("p0")).toThrow(GameError);
+  });
+
+  /* Congelada quer dizer congelada: sem isto, quem tem a vez baixa outra carta
+     enquanto os outros ainda estão batendo e o alvo do tapa muda no meio. */
+  it("blocks plays and draws while the slap is open", () => {
+    const game = slapGame();
+    game.playCard("p0", "nine");
+    expect(() => game.playCard("p0", "filler")).toThrow(GameError);
+    expect(() => game.drawCard("p0")).toThrow(GameError);
+  });
+
+  it("does not open on the nine that wins the game", () => {
+    const game = slapGame();
+    setHand(game, 0, [card("nine", "red", "number", 9)]);
+    game.playCard("p0", "nine");
+    expect(game.phase).toBe("finished");
+    expect(game.slapPending).toEqual([]);
+  });
+
+  /* Quem sai da mesa não deve mais nada — e a saída pode ser o que decide a
+     corrida, então a rodada tem que fechar na hora. */
+  it("closes the round when leaving leaves a single debtor", () => {
+    const game = slapGame();
+    game.playCard("p0", "nine");
+    game.slap("p0");
+    const before = game.players[1].hand.length;
+
+    game.removePlayer("p2");
+
+    expect(game.slapPending).toEqual([]);
+    expect(game.players.find((p) => p.id === "p1")!.hand.length).toBe(before + 1);
+  });
+
+  /* A rede de segurança: a mesa travou e a partida não pode esperar. Aqui todos
+     os que devem pagam, e não só um. */
+  it("punishes everyone still owing when the window times out", () => {
+    const game = slapGame();
+    game.playCard("p0", "nine");
+    game.slap("p0");
+    const before = [1, 2].map((i) => game.players[i].hand.length);
+
+    game.timeoutSlap();
+
+    expect(game.slapPending).toEqual([]);
+    expect([1, 2].map((i) => game.players[i].hand.length)).toEqual([
+      before[0] + 1,
+      before[1] + 1,
+    ]);
+    expect(game.currentPlayer!.id).toBe("p1");
+    // Mesa travada não é corrida perdida: o log tem que contar a outra história.
+    expect(game.log.slice(-2)).toEqual([
+      "P1 não bateu a tempo e comprou uma carta.",
+      "P2 não bateu a tempo e comprou uma carta.",
+    ]);
+  });
+});
+
 describe("draft", () => {
   it("always draws someone who is at the table", () => {
     for (let seed = 0; seed < 30; seed++) {
@@ -412,6 +524,36 @@ describe("draw until playable", () => {
     expect(game.players[0].hand).toHaveLength(2);
     expect(game.currentPlayer!.id).toBe("p1");
   });
+
+  /* Comprar até achar é uma busca com destino: passar depois de achar
+     devolveria a escolha que a regra tirou, e as cartas compradas no caminho
+     não teriam servido para nada. */
+  it("refuses to pass once the search has found its card", () => {
+    const game = newGame(3);
+    game.rules.drawUntilPlayable = true;
+    setHand(game, 0, [filler()]);
+    stackedDeck(game);
+    game.drawCard("p0");
+
+    expect(() => game.pass("p0")).toThrow(/obrigatório jogar/);
+    expect(game.currentPlayer!.id).toBe("p0");
+
+    // E a saída existe: a carta achada é sempre jogável.
+    game.playCard("p0", "d3");
+    expect(game.currentPlayer!.id).toBe("p1");
+  });
+
+  /* Sem a regra a compra é de uma carta só, e aí passar continua sendo o
+     direito de quem comprou. */
+  it("still lets a single drawn card be passed on when the rule is off", () => {
+    const game = newGame(3);
+    setHand(game, 0, [filler()]);
+    game.deck = [card("d3", "red", "number", 3)];
+    game.drawCard("p0");
+
+    game.pass("p0");
+    expect(game.currentPlayer!.id).toBe("p1");
+  });
 });
 
 describe("drawing", () => {
@@ -625,6 +767,26 @@ describe("fx events", () => {
       { k: "deal", to: "p0", n: INITIAL_HAND_SIZE },
       { k: "deal", to: "p1", n: INITIAL_HAND_SIZE },
       { k: "flip" },
+    ]);
+  });
+
+  /* O caso em que a diferença de estado mente: o tapa que fecha a rodada tira
+     duas mãos da lista de uma vez, e só o evento diz qual delas bateu. */
+  it("names who slapped, including on the tap that closes the round", () => {
+    const game = newGame(3);
+    game.rules.slapNine = true;
+    setHand(game, 0, [card("nine", "red", "number", 9), filler()]);
+    game.playCard("p0", "nine");
+    game.takeFx();
+
+    game.slap("p2");
+    expect(game.takeFx()).toEqual([{ k: "slap", by: "p2" }]);
+
+    // Este fecha a rodada: p1 fica devendo e compra. O tapa de p0 continua lá.
+    game.slap("p0");
+    expect(game.takeFx()).toEqual([
+      { k: "slap", by: "p0" },
+      { k: "draw", to: "p1", n: 1 },
     ]);
   });
 

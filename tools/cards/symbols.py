@@ -307,13 +307,15 @@ def wild_small(block=4, gap=1):
 
 
 # ---------------------------------------------------------------------- back --
-# The card back: the "UNO" wordmark, tilted to sit on the oval.
+# The card back: the "NUO" wordmark, tilted to sit on the oval. The name of the
+# game, and deliberately not the retail one — the deck is drawn from scratch,
+# and the word on the back is the one part that would otherwise be a copy.
 
 # Same 25 degrees the oval is tilted by — the deck has one angle, not two. The
 # sign is flipped, though, so the word ascends to the right while the oval's
 # long axis ascends to the right at 65. Both lean the same way; the word crosses
 # the oval instead of running up it, which is the only direction that stays
-# readable. (Running along the long axis would set "UNO" near-vertically.)
+# readable. (Running along the long axis would set "NUO" near-vertically.)
 MARK_COS, MARK_SIN = 0.906, 0.423
 
 
@@ -351,10 +353,13 @@ def rotate_pts(pts, w, h, cos_t=MARK_COS, sin_t=MARK_SIN):
 
 
 def back_mark():
-    """The tilted 'UNO' wordmark."""
+    """The tilted 'NUO' wordmark."""
     import glyphs
 
-    return rotate_pts(*glyphs.word("UNO"))
+    # Same three letters, same widths, same tracking as before: the tilted
+    # bounding box is unchanged, so the fit against the 52px inner width that
+    # LETTER_H was chosen for still holds.
+    return rotate_pts(*glyphs.word("NUO"))
 
 
 FACES = {

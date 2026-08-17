@@ -28,7 +28,7 @@
   --paper: #f1ebdd;
   --paper-sh: #c4bcaa;
 
-  /* --- o amarelo da palavra "UNO" no verso: a única cor de ênfase --- */
+  /* --- o amarelo da palavra "NUO" no verso: a única cor de ênfase --- */
   --mark-hi: #fde375;
   --mark: #f5ce45;
   --mark-sh: #c6911c;
@@ -437,6 +437,56 @@ body {
   transform: scale(1.06);
 }
 
+/* ---- tapa no 9 -----------------------------------------------------------
+ * O anel que pulsa em volta do 9 enquanto a corrida está aberta. Ele é uma
+ * chapa maciça ATRÁS da carta, e não uma borda: `outline` e `box-shadow`
+ * desenham um retângulo, e a carta tem canto chanfrado — o retângulo apareceria
+ * como quatro pontas saindo dos cantos. Recortado com o mesmo chanfro (7 de 64
+ * na largura, 7 de 96 na altura, medido em uno_card.md), ele vira a silhueta da
+ * própria carta, quatro pixels maior.
+ * ------------------------------------------------------------------------- */
+
+.uno-slap-ring {
+  position: absolute;
+  /* Quatro pixels de sobra por lado: a mesma unidade da sombra dura. */
+  inset: -4px;
+  /* Entre a pilha e a carta de cima, que leva z-index 2. */
+  z-index: 1;
+  background: var(--mark);
+  clip-path: polygon(
+    10.94% 0,
+    89.06% 0,
+    100% 7.29%,
+    100% 92.71%,
+    89.06% 100%,
+    10.94% 100%,
+    0 92.71%,
+    0 7.29%
+  );
+  transform: translate(var(--dx, 0), var(--dy, 0)) rotate(var(--rot, 0deg));
+  animation: px-blink 0.44s steps(1, end) infinite;
+  pointer-events: none;
+}
+
+/* O alvo do tapa: a pilha inteira, e não a carta. Tapa quer alvo grande, e
+   nesse instante nada mais pode ser arrastado para cá — a mesa está congelada. */
+.uno-slap-hit {
+  position: absolute;
+  /* Maior que a pilha de propósito: o espalhamento joga a carta de cima uns
+     pixels para fora, e errar o tapa por causa disso seria injusto. */
+  inset: -12px;
+  z-index: 5;
+  border: 0;
+  padding: 0;
+  background: none;
+  cursor: pointer;
+}
+/* Já bateu: o anel continua pulsando para os outros, mas o alvo sai do caminho
+   para não parecer que ainda falta alguma coisa sua. */
+.uno-slap-hit:disabled {
+  cursor: default;
+}
+
 /* ---- cartas em voo -------------------------------------------------------
  * A carta que sai do monte e chega na sua mão, ou no assento de quem comprou.
  * As coordenadas vêm medidas do DOM em src/game/flights.ts; aqui só se desenha.
@@ -677,7 +727,10 @@ body {
   .px-pop,
   /* a regra combinada tem especificidade 0,2,0 e venceria as de cima */
   .px-btn-urgent.px-pop,
-  .uno-seat-active::before {
+  .uno-seat-active::before,
+  /* O anel do tapa para de piscar, mas continua aceso: ele não é enfeite, é o
+     que diz onde bater. */
+  .uno-slap-ring {
     animation: none;
   }
 }

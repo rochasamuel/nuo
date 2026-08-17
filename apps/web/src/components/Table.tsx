@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { COLOR_NAME, isWild, type Card, type PlayColor, type TableState } from "@uno/shared";
-import type { RoomActions } from "../game/useRoomConnection";
+import type { RoomActions, RoomConnection } from "../game/useRoomConnection";
 import { flyPlay, handCardPose, markLeaving, type Pose } from "../game/flights";
 import { artUrl, COLOR_HEX, scatter } from "../lib/cards";
 import { useSound } from "../lib/sound";
@@ -20,24 +20,49 @@ type Props = {
   hand: Card[];
   playableIds: Set<string>;
   actions: RoomActions;
+  /**
+   * Os eventos da sala, para o som do tapa dos outros. Opcional porque a mesa
+   * de mentira do /mock não tem sala atrás dela.
+   */
+  onFx?: RoomConnection["onFx"];
   /** Deixa a mesa e volta para a tela inicial. */
   onExit: () => void;
 };
 
-export function Table({ state, sessionId, hand, playableIds, actions, onExit }: Props) {
+export function Table({ state, sessionId, hand, playableIds, actions, onFx, onExit }: Props) {
   const discardRef = useRef<HTMLDivElement>(null);
   const [dropArmed, setDropArmed] = useState(false);
   const [pendingWild, setPendingWild] = useState<string | null>(null);
   const soundEnabled = useUi((ui) => ui.soundEnabled);
   const toggleSound = useUi((ui) => ui.toggleSound);
 
+  const playSound = useSound();
   useTableSounds(state, sessionId, hand.length);
+  useSlapSound(sessionId, onFx);
+
+  /*
+   * O seu tapa soa no clique, sem esperar o servidor confirmar — a mesma
+   * escolha da carta que parte da mão. Aqui ela pesa mais: o tapa é uma
+   * corrida de reflexo, e cem milissegundos de ida e volta transformam o som
+   * de resposta em eco. O dos outros vem pelo estado, em `useTableSounds`.
+   */
+  const tap = () => {
+    playSound("slap");
+    actions.slap();
+  };
 
   const yourTurn = state.currentPlayerId === sessionId && state.phase === "playing";
   const seats = seatOrder(state, sessionId);
   const current = state.players.find((player) => player.id === state.currentPlayerId);
   const me = state.players.find((player) => player.id === sessionId);
   const canCallUno = state.phase === "playing" && hand.length === 1 && !me?.calledUno;
+
+  // A mesa congelada pelo tapa: ninguém joga, todo mundo bate. `mine` é se você
+  // ainda deve o seu — quem já bateu só assiste os outros correrem.
+  const slapping = state.slapPending.length > 0;
+  const slap = slapping
+    ? { mine: state.slapPending.includes(sessionId), onSlap: tap }
+    : undefined;
 
   /*
    * A sua carta parte no clique, sem esperar o servidor confirmar. Ela é a
@@ -144,8 +169,11 @@ export function Table({ state, sessionId, hand, playableIds, actions, onExit }: 
         <DrawPile
           remaining={state.deckCount}
           // Só se compra sem jogada possível — mas pagar a pilha é sempre uma
-          // saída, mesmo com um +2 na mão para empilhar.
-          disabled={!yourTurn || (state.pendingDraw === 0 && playableIds.size > 0)}
+          // saída, mesmo com um +2 na mão para empilhar. Com o tapa aberto a
+          // mesa está congelada e nem isso vale.
+          disabled={
+            slapping || !yourTurn || (state.pendingDraw === 0 && playableIds.size > 0)
+          }
           onDraw={actions.draw}
         />
         <DiscardPile
@@ -153,6 +181,7 @@ export function Table({ state, sessionId, hand, playableIds, actions, onExit }: 
           cards={state.discard}
           total={state.discardCount}
           armed={dropArmed}
+          slap={slap}
         />
       </section>
 
@@ -178,6 +207,12 @@ export function Table({ state, sessionId, hand, playableIds, actions, onExit }: 
         </div>
 
         <div className="flex min-h-9 flex-wrap items-center justify-center gap-3">
+          {slapping && (
+            <span className="px-label" style={{ color: "var(--mark)" }}>
+              {slap?.mine ? "Tapa no 9! Bata na carta · " : "Tapa no 9 · "}
+              faltam {state.slapPending.length}
+            </span>
+          )}
           {state.pendingDraw > 0 && yourTurn && (
             <span className="px-label" style={{ color: "var(--mark)" }}>
               {/* Só há carta jogável com a pilha de pé numa mesa que empilha, e
@@ -187,10 +222,18 @@ export function Table({ state, sessionId, hand, playableIds, actions, onExit }: 
                 : `Compre ${state.pendingDraw} cartas`}
             </span>
           )}
+          {/* Comprando até achar não há o que decidir: a carta que a busca
+              trouxe tem que ser baixada, então o botão dá lugar ao aviso. */}
           {state.mustPlayDrawn && yourTurn && (
-            <button type="button" onClick={actions.pass} className="px-btn">
-              Passar a vez
-            </button>
+            state.rules.drawUntilPlayable ? (
+              <span className="px-label" style={{ color: "var(--mark)" }}>
+                Baixe a carta que você comprou
+              </span>
+            ) : (
+              <button type="button" onClick={actions.pass} className="px-btn">
+                Passar a vez
+              </button>
+            )
           )}
           {/* Só acende na janela em que vale — o botão desabilitado é o que
               impede o clique adiantado, e o servidor recusa de qualquer jeito. */}
@@ -280,4 +323,23 @@ function useTableSounds(state: TableState, sessionId: string, handSize: number) 
       phase: state.phase,
     };
   }, [handSize, play, sessionId, state.currentPlayerId, state.discardCount, state.phase]);
+}
+
+/**
+ * O tapa dos outros, pelo evento e não pela diferença de estado: o patch que
+ * fecha a rodada tira duas mãos de uma vez, e olhando só o antes e o depois o
+ * tapa que decide a corrida seria mudo. O seu não passa por aqui — ele já soou
+ * no clique, sem esperar a ida e volta.
+ */
+function useSlapSound(sessionId: string, onFx?: RoomConnection["onFx"]) {
+  const play = useSound();
+
+  useEffect(() => {
+    if (!onFx) return;
+    return onFx((events) => {
+      if (events.some((event) => event.k === "slap" && event.by !== sessionId)) {
+        play("slap");
+      }
+    });
+  }, [onFx, play, sessionId]);
 }

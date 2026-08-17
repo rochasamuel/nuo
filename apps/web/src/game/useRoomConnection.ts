@@ -50,6 +50,8 @@ export type RoomActions = {
   pass: () => void;
   callUno: () => void;
   catchUno: (targetId: string) => void;
+  /** Bater no 9 que está no topo do descarte. */
+  slap: () => void;
   restart: () => void;
 };
 
@@ -221,6 +223,7 @@ export function useRoomConnection(code: string): RoomConnection {
       pass: () => roomRef.current?.send("pass"),
       callUno: () => roomRef.current?.send("uno"),
       catchUno: (targetId) => roomRef.current?.send("catch", { targetId }),
+      slap: () => roomRef.current?.send("slap"),
       restart: () => roomRef.current?.send("restart"),
     }),
     [],

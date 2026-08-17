@@ -51,7 +51,7 @@ export function HomeScreen() {
           tipografia do baralho, inclinada nos mesmos 25° do oval. */}
       <img
         src={BACK_URL}
-        alt="UNO"
+        alt="NUO"
         className="uno-card mx-auto"
         style={{ width: 132 }}
       />

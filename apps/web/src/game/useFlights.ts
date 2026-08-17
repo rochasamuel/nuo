@@ -131,5 +131,9 @@ function dispatch(event: FxEvent, sessionId: string, awaiting: Pending[]) {
       return;
     case "recycle":
       return flyRecycle();
+    case "slap":
+      // Não é um voo: nenhuma carta se move. Quem escuta é a mesa, que toca o
+      // som do tapa. Aqui só se reconhece o evento.
+      return;
   }
 }

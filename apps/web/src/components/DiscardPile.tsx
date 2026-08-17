@@ -8,13 +8,20 @@ type Props = {
   cards: PublicCard[];
   total: number;
   armed: boolean;
+  /**
+   * O tapa no 9 em curso, se houver. `mine` é se VOCÊ ainda deve — quem já
+   * bateu continua vendo o anel dos outros, mas não tem mais o que clicar.
+   */
+  slap?: { mine: boolean; onSlap: () => void };
   ref: React.RefObject<HTMLDivElement | null>;
 };
 
-export function DiscardPile({ cards, total, armed, ref }: Props) {
+export function DiscardPile({ cards, total, armed, slap, ref }: Props) {
   // A carta que ainda está voando até aqui não pode já estar na pilha.
   const airborne = useFlightStore((state) => state.heldDiscard);
   const shown = airborne.size > 0 ? cards.filter((card) => !airborne.has(card.id)) : cards;
+  const top = cards.at(-1);
+  const topAirborne = !top || airborne.has(top.id);
 
   /*
    * `seen` acompanha o total REAL, não o que está visível. É o que faz o
@@ -65,10 +72,43 @@ export function DiscardPile({ cards, total, armed, ref }: Props) {
               "--rot": `${rot}deg`,
               "--dx": `${dx}%`,
               "--dy": `${dy}%`,
+              // A carta de cima passa na frente do anel do tapa; as de baixo
+              // ficam atrás dele. É o que faz o anel emoldurar só o 9 em vez de
+              // aparecer em retalhos entre as cartas espalhadas da pilha.
+              zIndex: isTop ? 2 : undefined,
             } as React.CSSProperties}
           />
         );
       })}
+
+      {/* O anel só nasce com o 9 já pousado: anunciar o tapa numa carta que
+          ainda está no ar seria pedir para bater no vazio. */}
+      {slap && !topAirborne && <SlapRing total={total} />}
+
+      {slap?.mine && (
+        <button
+          type="button"
+          className="uno-slap-hit"
+          onClick={slap.onSlap}
+          aria-label="Bater no 9"
+        />
+      )}
     </div>
+  );
+}
+
+/** O anel pulsante, na pose exata da carta de cima. */
+function SlapRing({ total }: { total: number }) {
+  const { rot, dx, dy } = scatter(total - 1, total, true);
+  return (
+    <span
+      aria-hidden
+      className="uno-slap-ring"
+      style={{
+        "--rot": `${rot}deg`,
+        "--dx": `${dx}%`,
+        "--dy": `${dy}%`,
+      } as React.CSSProperties}
+    />
   );
 }

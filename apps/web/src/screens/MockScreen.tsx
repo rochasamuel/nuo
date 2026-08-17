@@ -60,6 +60,9 @@ export function MockScreen() {
   const [pendingDraw, setPendingDraw] = useState(0);
   const [stacking, setStacking] = useState(true);
   const [drawUntilPlayable, setDrawUntilPlayable] = useState(false);
+  const [slapNine, setSlapNine] = useState(true);
+  /** Quem ainda deve o tapa. Vazio é o caso normal. */
+  const [slapPending, setSlapPending] = useState<string[]>([]);
   const [catchOpen, setCatchOpen] = useState(true);
   const [mustPlayDrawn, setMustPlayDrawn] = useState(false);
   const [nudge, setNudge] = useState(0);
@@ -105,7 +108,7 @@ export function MockScreen() {
       hostId: ME,
       phase: finished ? "finished" : "playing",
       maxPlayers: 10,
-      rules: { stacking, drawUntilPlayable },
+      rules: { stacking, drawUntilPlayable, slapNine },
       players,
       currentPlayerId: ME,
       // Sem sorteio em curso: em /mock a roleta é um botão da barra lateral.
@@ -120,6 +123,7 @@ export function MockScreen() {
       vulnerablePlayerId: "p1",
       catchOpen,
       mustPlayDrawn,
+      slapPending,
       log: [
         "A partida começou com 2 azul.",
         "Ana Beatriz jogou bloqueio azul.",
@@ -138,14 +142,21 @@ export function MockScreen() {
     mustPlayDrawn,
     pendingDraw,
     playerCount,
+    slapNine,
+    slapPending,
     stacking,
     wildOnTop,
   ]);
 
-  // Metade das cartas jogáveis, para ver as duas aparências no mesmo leque.
+  // Metade das cartas jogáveis, para ver as duas aparências no mesmo leque —
+  // e nenhuma com o tapa aberto, que é o que o servidor responde numa mesa
+  // congelada.
   const playableIds = useMemo(
-    () => new Set(hand.filter((_, i) => i % 2 === 0).map((card) => card.id)),
-    [hand],
+    () =>
+      slapPending.length > 0
+        ? new Set<string>()
+        : new Set(hand.filter((_, i) => i % 2 === 0).map((card) => card.id)),
+    [hand, slapPending],
   );
 
   /*
@@ -177,6 +188,15 @@ export function MockScreen() {
     pass: () => setMustPlayDrawn(false),
     callUno: () => {},
     catchUno: (targetId) => flyDraw({ toSeat: targetId, count: 2 }),
+    // Bater tira você da lista. Sobrando um, ele compra — a mesma resolução do
+    // servidor, para dar de ver aqui a rodada inteira e não só o anel.
+    slap: () =>
+      setSlapPending((pending) => {
+        const left = pending.filter((id) => id !== ME);
+        if (left.length > 1) return left;
+        if (left.length === 1) flyDraw({ toSeat: left[0], count: 1 });
+        return [];
+      }),
     restart: () => setFinished(false),
   };
 
@@ -228,6 +248,7 @@ export function MockScreen() {
           on={drawUntilPlayable}
           onClick={() => setDrawUntilPlayable((v) => !v)}
         />
+        <Toggle label="Tapa no 9" on={slapNine} onClick={() => setSlapNine((v) => !v)} />
         <Toggle label="Coringa no topo" on={wildOnTop} onClick={() => setWildOnTop((v) => !v)} />
         <Toggle label="Pegar liberado" on={catchOpen} onClick={() => setCatchOpen((v) => !v)} />
         <Toggle label="Comprou, pode passar" on={mustPlayDrawn} onClick={() => setMustPlayDrawn((v) => !v)} />
@@ -248,6 +269,13 @@ export function MockScreen() {
         </button>
         <button type="button" className="px-btn" onClick={spin}>
           Sortear quem começa
+        </button>
+        <button
+          type="button"
+          className="px-btn"
+          onClick={() => setSlapPending(state.players.map((player) => player.id))}
+        >
+          Abrir tapa no 9
         </button>
         <p className="px-label">
           Clique numa carta para jogar; no monte para comprar. A compra pendente

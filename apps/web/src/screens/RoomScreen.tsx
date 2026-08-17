@@ -46,6 +46,7 @@ export function RoomScreen({ code }: { code: string }) {
           hand={connection.hand}
           playableIds={connection.playableIds}
           actions={connection.actions}
+          onFx={connection.onFx}
           onExit={exit}
         />
       )}

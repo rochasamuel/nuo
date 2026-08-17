@@ -42,6 +42,16 @@ export const UNO_GRACE = 50;
  */
 export const STARTER_SPIN = 2600;
 /**
+ * Quanto tempo, em ms, o tapa no 9 espera antes de se resolver sozinho.
+ *
+ * Não é o tempo da brincadeira — ela acaba sozinha no instante em que sobra um
+ * só. É a rede para a mesa que travou: alguém caiu, alguém foi atender a porta,
+ * e sem isto a partida esperaria por uma mão que não vem. Cinco segundos é
+ * muito mais do que qualquer tapa honesto leva, que é como tem que ser: a rede
+ * não pode competir com a corrida.
+ */
+export const SLAP_TIMEOUT = 5000;
+/**
  * Segundos que um jogador caído mantém o lugar durante a partida. Segurar o
  * lugar por muito tempo é o que trava a mesa quando a queda é na vez dele: os
  * outros ficam olhando um relógio que não é deles. Um minuto e meio é o que
@@ -70,9 +80,15 @@ export type HouseRules = {
   stacking: boolean;
   /** Sem jogada, compra-se até vir uma carta que sirva, e não uma só. */
   drawUntilPlayable: boolean;
+  /** Todo 9 baixado abre uma corrida: quem bater por último compra. */
+  slapNine: boolean;
 };
 
-export const DEFAULT_RULES: HouseRules = { stacking: false, drawUntilPlayable: false };
+export const DEFAULT_RULES: HouseRules = {
+  stacking: false,
+  drawUntilPlayable: false,
+  slapNine: false,
+};
 
 /**
  * A lista que a tela inicial vira checkbox e o lobby vira texto. Uma regra nova
@@ -88,7 +104,12 @@ export const RULES: { key: keyof HouseRules; label: string; hint: string }[] = [
   {
     key: "drawUntilPlayable",
     label: "Comprar até achar",
-    hint: "Sem jogada na mão, compre até vir uma carta que sirva — e então baixe essa carta ou passe a vez.",
+    hint: "Sem jogada na mão, compre até vir uma carta que sirva — e então é obrigatório baixá-la. Aqui não se passa a vez.",
+  },
+  {
+    key: "slapNine",
+    label: "Tapa no 9",
+    hint: "Todo 9 baixado para a mesa: todo mundo bate na carta, inclusive quem jogou. O último compra uma.",
   },
 ];
 
@@ -179,6 +200,11 @@ export type TableState = {
   /** A carência passou: os outros já podem pegar quem está exposto. */
   catchOpen: boolean;
   mustPlayDrawn: boolean;
+  /**
+   * Quem ainda deve um tapa no 9 que está no topo do descarte. Lista vazia é o
+   * caso normal: não há tapa aberto, e a mesa não está congelada.
+   */
+  slapPending: string[];
   log: string[];
 };
 
@@ -228,7 +254,14 @@ export type FxEvent =
   /** A carta que abre a partida, virada do monte para o descarte. */
   | { k: "flip" }
   /** A compra acabou e o descarte virou baralho de novo. */
-  | { k: "recycle" };
+  | { k: "recycle" }
+  /**
+   * `by` bateu no 9. Aqui a diferença de estado mente igual aos outros casos: o
+   * patch que fecha a rodada tira duas mãos da lista de uma vez — a de quem
+   * bateu e a de quem perdeu — e olhando só o antes e o depois não há como
+   * separá-las. Sem este evento, o tapa que decide a corrida seria mudo.
+   */
+  | { k: "slap"; by: string };
 
 /** server -> client, broadcast. Vem antes do patch de estado correspondente. */
 export type FxMessage = FxEvent[];

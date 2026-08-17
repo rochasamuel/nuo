@@ -43,6 +43,13 @@ export class UnoGame {
   pendingDraw = 0;
   /** Set when the current player drew a playable card: they may still play that one card, or pass. */
   drawnCardId: string | null = null;
+  /**
+   * Quem ainda deve o tapa no 9 que está no topo do descarte. Enquanto tiver
+   * alguém aqui a mesa está congelada: é a única situação do jogo em que todo
+   * mundo age ao mesmo tempo, e deixar uma jogada passar no meio trocaria a
+   * carta debaixo da mão de quem ainda está batendo.
+   */
+  slapPending: string[] = [];
   /** Player left holding one card who never said UNO. Anyone may catch them until the next action. */
   vulnerableId = "";
   /** Quando essa exposição começou, para a carência do `catchUno`. */
@@ -113,6 +120,14 @@ export class UnoGame {
     this.currentIndex %= this.players.length;
     this.drawnCardId = null;
     if (wasCurrent) this.pendingDraw = 0;
+
+    // Quem saiu não deve mais o tapa — e a saída pode ser justamente o que
+    // decide a corrida, então ela fecha aqui, e não na próxima batida.
+    const owed = this.slapPending.indexOf(id);
+    if (owed !== -1) {
+      this.slapPending.splice(owed, 1);
+      this.closeSlapIfDecided();
+    }
   }
 
   /**
@@ -140,6 +155,7 @@ export class UnoGame {
     this.pendingDraw = 0;
     this.drawnCardId = null;
     this.vulnerableId = "";
+    this.slapPending = [];
     this.winnerId = "";
     this.phase = "playing";
     this.log = [];
@@ -206,7 +222,33 @@ export class UnoGame {
     if (player.hand.length > 1) player.calledUno = false;
 
     this.drawnCardId = null;
+    // O tapa segura o efeito da carta: a vez só anda quando a corrida acabar.
+    if (this.opensSlap(card)) return;
     this.applyEffect(card);
+  }
+
+  /**
+   * Bater no 9. Sai da lista de quem deve — e quando sobra um só, a corrida
+   * acabou: não há o que esperar da última mão, porque ela já perdeu.
+   */
+  slap(playerId: string) {
+    if (this.slapPending.length === 0) throw new GameError("Não há tapa em jogo.");
+    const index = this.slapPending.indexOf(playerId);
+    if (index === -1) throw new GameError("Você já bateu.");
+
+    this.slapPending.splice(index, 1);
+    this.fx.push({ k: "slap", by: playerId });
+    this.closeSlapIfDecided();
+  }
+
+  /**
+   * A rede de segurança do tapa, puxada de fora pela sala. Aqui não há mais
+   * corrida a decidir: quem não bateu a tempo paga, sejam quantos forem.
+   */
+  timeoutSlap() {
+    if (this.slapPending.length === 0) return;
+    this.punishSlappers(this.slapPending.splice(0), "late");
+    this.resumeAfterSlap();
   }
 
   drawCard(playerId: string) {
@@ -270,6 +312,12 @@ export class UnoGame {
     if (this.drawnCardId === null) {
       throw new GameError("Você só pode passar depois de comprar.");
     }
+    // Comprar até achar é uma busca com destino: a mesa pagou cartas até
+    // aparecer uma que serve, e passar aqui devolveria a escolha que a regra
+    // tirou — as compras do caminho não teriam servido para nada.
+    if (this.rules.drawUntilPlayable) {
+      throw new GameError("Você comprou até achar: é obrigatório jogar a carta.");
+    }
     this.pushLog(`${player.name} passou a vez.`);
     this.endTurn();
   }
@@ -318,6 +366,9 @@ export class UnoGame {
     const player = this.players.find((p) => p.id === playerId);
     if (!player) return [];
     if (this.phase !== "playing") return [];
+    // Mesa congelada pelo tapa: nada é jogável, nem para quem tem a vez. Sem
+    // isto o leque continua aceso convidando para uma jogada que será recusada.
+    if (this.slapPending.length > 0) return [];
     if (this.currentPlayer?.id !== playerId) return [];
     if (this.drawnCardId !== null) {
       return player.hand.filter((c) => c.id === this.drawnCardId);
@@ -349,6 +400,9 @@ export class UnoGame {
 
   private requireTurn(playerId: string): GamePlayer {
     if (this.phase !== "playing") throw new GameError("A partida não está em andamento.");
+    // A mesa está congelada pelo tapa. Deixar a vez andar aqui trocaria a carta
+    // debaixo da mão de quem ainda está batendo.
+    if (this.slapPending.length > 0) throw new GameError("Bata no 9 primeiro.");
     const player = this.currentPlayer;
     if (!player || player.id !== playerId) throw new GameError("Não é o seu turno.");
     return player;
@@ -382,6 +436,70 @@ export class UnoGame {
       default:
         break;
     }
+  }
+
+  /* ------------------------------------------------------------ tapa no 9 */
+
+  /**
+   * Abre o tapa, se a carta pedir. Todo mundo entra na lista, inclusive quem
+   * baixou: a regra é essa, e é o que faz a corrida valer para a mesa toda.
+   */
+  private opensSlap(card: Card): boolean {
+    if (!this.rules.slapNine) return false;
+    if (card.type !== "number" || card.value !== 9) return false;
+    this.slapPending = this.players.map((p) => p.id);
+    this.pushLog("Tapa no 9! Todo mundo bate na carta.");
+    // Com dois na mesa a corrida ainda existe — o primeiro a bater ganha —, mas
+    // uma mesa de um jogador só não tem em quem perder.
+    return !this.closeSlapIfDecided();
+  }
+
+  /** Sobrou um? Então ele é o mais lento, e a rodada acaba sem esperá-lo. */
+  private closeSlapIfDecided(): boolean {
+    if (this.slapPending.length > 1) return false;
+    this.punishSlappers(this.slapPending.splice(0), "slowest");
+    this.resumeAfterSlap();
+    return true;
+  }
+
+  /**
+   * Uma carta para cada mão que ficou devendo.
+   *
+   * `why` só muda o que o log conta, e conta duas coisas diferentes: perder a
+   * corrida por ser o mais lento é o jogo funcionando, e não bater dentro do
+   * prazo é a mesa ter travado. Escrever "bateu por último" para três pessoas
+   * de uma vez seria a segunda situação contada como se fosse a primeira.
+   */
+  private punishSlappers(ids: string[], why: "slowest" | "late") {
+    for (const id of ids) {
+      const player = this.players.find((p) => p.id === id);
+      if (!player) continue;
+      const taken = this.take(1);
+      if (taken.length === 0) {
+        this.pushLog(`${player.name} devia uma carta, mas não há o que comprar.`);
+        continue;
+      }
+      player.hand.push(...taken);
+      this.fx.push({ k: "draw", to: player.id, n: taken.length });
+      // Comprar tira quem estava com uma carta só da linha de tiro, exatamente
+      // como em qualquer outra compra.
+      player.calledUno = false;
+      if (this.vulnerableId === player.id) this.vulnerableId = "";
+      this.pushLog(
+        why === "slowest"
+          ? `${player.name} bateu por último e comprou uma carta.`
+          : `${player.name} não bateu a tempo e comprou uma carta.`,
+      );
+    }
+  }
+
+  /**
+   * A mesa descongela: o 9 que ficou esperando finalmente faz efeito. Ele
+   * continua sendo o topo do descarte porque nada pôde ser jogado no meio.
+   */
+  private resumeAfterSlap() {
+    if (this.phase !== "playing") return;
+    this.applyEffect(this.topCard!);
   }
 
   private applyEffect(card: Card) {

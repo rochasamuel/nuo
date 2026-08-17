@@ -32,6 +32,7 @@ export class CardState extends Schema {
 export class RulesState extends Schema implements HouseRules {
   @type("boolean") stacking = false;
   @type("boolean") drawUntilPlayable = false;
+  @type("boolean") slapNine = false;
 }
 
 export class PlayerState extends Schema {
@@ -71,5 +72,10 @@ export class UnoRoomState extends Schema {
   @type("boolean") catchOpen = false;
   /** The current player drew a playable card: they may play that one card or pass. */
   @type("boolean") mustPlayDrawn = false;
+  /**
+   * Quem ainda deve o tapa no 9 do topo do descarte. Lista não vazia é uma mesa
+   * congelada: ninguém joga até a corrida acabar.
+   */
+  @type(["string"]) slapPending = new ArraySchema<string>();
   @type(["string"]) log = new ArraySchema<string>();
 }

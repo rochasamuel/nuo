@@ -633,7 +633,7 @@ if __name__ == "__main__":
 
     # The back. One file, no suit, no face variants.
     g = compact(build_card(TIER, COLORWAYS["back"], "back"))
-    rects, paths = write_svg(g, OUT / "uno-back.svg", "UNO back")
+    rects, paths = write_svg(g, OUT / "uno-back.svg", "NUO back")
     total += 1
     print(f"{'back':7s} back:{rects}r")
 

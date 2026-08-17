@@ -109,7 +109,9 @@ Três coisas que só apareceram ao renderizar, e que valem se você mexer nelas:
 
 ### O verso
 
-Corpo quase preto dos coringas + oval vermelho + "UNO" amarelo. Nada de novo na
+Corpo quase preto dos coringas + oval vermelho + "NUO" amarelo — o nome do jogo,
+e de propósito não o da caixa: o baralho é desenhado do zero, e a palavra do
+verso era a única peça que seria cópia. Nada de novo na
 carta em si: é a mesma moldura, o mesmo rim, o mesmo oval inclinado a 25° na
 mesma posição. Só a colorway e o glifo central mudam.
 
@@ -164,7 +166,7 @@ Os dois se inclinam para o mesmo lado, e a palavra **cruza** o oval em vez de
 subir por ele.
 
 > Correr a palavra pelo eixo maior parece a escolha óbvia (é onde cabem 62 px em
-> vez de 45), mas esse eixo está a 65° da horizontal: "UNO" sairia quase na
+> vez de 45), mas esse eixo está a 65° da horizontal: "NUO" sairia quase na
 > vertical. Das direções que ainda se leem, 25° subindo é a mais larga — 44,7 px
 > de oval, contra 40,8 px na horizontal e 34,4 px descendo pelo eixo menor.
 > Descer também brigaria com a inclinação do oval em vez de acompanhá-la.
