@@ -13,7 +13,7 @@ import {
 import { FlightLayer } from "../components/FlightLayer";
 import { StarterRoulette } from "../components/StarterRoulette";
 import { Table } from "../components/Table";
-import { flyDeal, flyDraw } from "../game/flights";
+import { flyDeal, flyDraw, flySwap } from "../game/flights";
 import type { RoomActions } from "../game/useRoomConnection";
 
 /**
@@ -62,8 +62,11 @@ export function MockScreen() {
   const [stacking, setStacking] = useState(true);
   const [drawUntilPlayable, setDrawUntilPlayable] = useState(false);
   const [slapNine, setSlapNine] = useState(true);
+  const [sevenSwap, setSevenSwap] = useState(true);
   /** Quem ainda deve o tapa. Vazio é o caso normal. */
   const [slapPending, setSlapPending] = useState<string[]>([]);
+  /** Quem deve escolher a troca no 7. Vazio é o caso normal. */
+  const [swapChooserId, setSwapChooserId] = useState("");
   const [catchOpen, setCatchOpen] = useState(true);
   const [mustPlayDrawn, setMustPlayDrawn] = useState(false);
   const [nudge, setNudge] = useState(0);
@@ -109,7 +112,7 @@ export function MockScreen() {
       hostId: ME,
       phase: finished ? "finished" : "playing",
       maxPlayers: 10,
-      rules: { stacking, drawUntilPlayable, slapNine },
+      rules: { stacking, drawUntilPlayable, slapNine, sevenSwap },
       players,
       currentPlayerId: ME,
       // Sem sorteio em curso: em /mock a roleta é um botão da barra lateral.
@@ -125,6 +128,7 @@ export function MockScreen() {
       catchOpen,
       mustPlayDrawn,
       slapPending,
+      swapChooserId,
       log: [
         "A partida começou com 2 azul.",
         "Ana Beatriz jogou bloqueio azul.",
@@ -143,9 +147,11 @@ export function MockScreen() {
     mustPlayDrawn,
     pendingDraw,
     playerCount,
+    sevenSwap,
     slapNine,
     slapPending,
     stacking,
+    swapChooserId,
     wildOnTop,
   ]);
 
@@ -154,10 +160,10 @@ export function MockScreen() {
   // congelada.
   const playableIds = useMemo(
     () =>
-      slapPending.length > 0
+      slapPending.length > 0 || swapChooserId !== ""
         ? new Set<string>()
         : new Set(hand.filter((_, i) => i % 2 === 0).map((card) => card.id)),
-    [hand, slapPending],
+    [hand, slapPending, swapChooserId],
   );
 
   /*
@@ -210,6 +216,12 @@ export function MockScreen() {
         if (left.length === 1) flyDraw({ toSeat: left[0], count: 1 });
         return [];
       }),
+    // Escolher fecha a troca e manda as duas mãos atravessarem a mesa. A mão de
+    // mentira não muda de dono: o que se revisa aqui é a travessia.
+    swap: (targetId) => {
+      setSwapChooserId("");
+      flySwap(null, targetId);
+    },
     emote: (emote) => {
       for (const handler of emoteHandlers.current) handler({ by: ME, emote });
     },
@@ -266,6 +278,7 @@ export function MockScreen() {
           onClick={() => setDrawUntilPlayable((v) => !v)}
         />
         <Toggle label="Tapa no 9" on={slapNine} onClick={() => setSlapNine((v) => !v)} />
+        <Toggle label="Troca no 7" on={sevenSwap} onClick={() => setSevenSwap((v) => !v)} />
         <Toggle label="Coringa no topo" on={wildOnTop} onClick={() => setWildOnTop((v) => !v)} />
         <Toggle label="Pegar liberado" on={catchOpen} onClick={() => setCatchOpen((v) => !v)} />
         <Toggle label="Comprou, pode passar" on={mustPlayDrawn} onClick={() => setMustPlayDrawn((v) => !v)} />
@@ -293,6 +306,29 @@ export function MockScreen() {
           onClick={() => setSlapPending(state.players.map((player) => player.id))}
         >
           Abrir tapa no 9
+        </button>
+        <button
+          type="button"
+          className="px-btn"
+          onClick={() => setSwapChooserId(ME)}
+        >
+          Trocar no 7 · você escolhe
+        </button>
+        <button
+          type="button"
+          className="px-btn"
+          onClick={() => setSwapChooserId(state.players[1].id)}
+        >
+          Trocar no 7 · outro escolhe
+        </button>
+        {/* A travessia entre dois adversários, que é o caso que a mesa mais vê
+            e o único que não dá para disparar clicando num assento. */}
+        <button
+          type="button"
+          className="px-btn"
+          onClick={() => flySwap(state.players[1].id, state.players[2].id)}
+        >
+          Trocar no 7 · entre outros
         </button>
         <p className="px-label">
           Clique numa carta para jogar; no monte para comprar. A compra pendente

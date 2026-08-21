@@ -23,6 +23,28 @@ const DEAL_STAGGER = 55;
 /** Quantos versos representam o descarte inteiro voltando a ser baralho. */
 const RECYCLE_CARDS = 3;
 /**
+ * Quantos versos atravessam a mesa em cada sentido na troca no 7. Pelo mesmo
+ * motivo do reembaralhar: o que se lê é "as mãos trocaram de lugar", e mandar
+ * doze cartas para um lado e três para o outro só entulharia a mesa — as
+ * contagens novas já estão nos assentos. Quatro, e não três, porque aqui há
+ * dois maços cruzando ao mesmo tempo: o que precisa ficar claro é a travessia,
+ * e travessia se lê em fila, não em carta solta.
+ */
+const SWAP_CARDS = 4;
+/**
+ * Quanto o maço da troca encolhe ao chegar num assento.
+ *
+ * Não é o `SEAT_SCALE` das compras, e de propósito: aquele é o tamanho de uma
+ * carta que vai VIRAR parte da pilha do assento, e por isso pousa do tamanho
+ * dela. Estas não viram nada — ninguém as segura, elas somem no fim —, e a
+ * 0,22 uma troca entre dois adversários seria um cisco atravessando a mesa. É
+ * o gesto que se está desenhando, e ele tem que ser visto do outro lado — sem
+ * virar um maço que cobre os dois assentos quando eles são vizinhos.
+ */
+const SWAP_SCALE = 0.4;
+/** Meia passada de atraso no maço que volta, para os dois lerem como duas filas. */
+const SWAP_OFFSET = 35;
+/**
  * Abaixo desta distância o voo é um deslize, não um arremesso: sem arco e mais
  * curto. É o caso de soltar a carta em cima do descarte — ela já está lá, e
  * fazê-la subir antes de assentar seria inventar um movimento que ninguém pediu.
@@ -407,6 +429,36 @@ export function flyPlay(
     settle: source.kind === "me" ? SETTLE_MS : 0,
     holds: { kind: "discard", id: card.id },
   });
+}
+
+/**
+ * As duas mãos da troca no 7 cruzando a mesa.
+ *
+ * `null` é você: de um lado o assento do outro, do outro o seu leque. Nada é
+ * segurado enquanto o voo dura — ao contrário da compra, aqui as duas pontas
+ * mudam ao mesmo tempo e esconder qualquer uma delas deixaria um contador
+ * mentindo até o pouso. O que se anima é a travessia, e não a chegada: a mão
+ * nova já entra virando carta por carta, que é o `is-new` do leque.
+ */
+export function flySwap(a: string | null, b: string | null) {
+  if (reduced()) return;
+  const width = cardWidth();
+  const pose = (seat: string | null) =>
+    seat ? center(`seat:${seat}`, 0, SWAP_SCALE) : handSlot(width);
+
+  const from = pose(a);
+  const to = pose(b);
+  for (let i = 0; i < SWAP_CARDS; i++) {
+    launch({ from, to, width, art: BACK_URL, delay: i * STAGGER, holds: null });
+    launch({
+      from: to,
+      to: from,
+      width,
+      art: BACK_URL,
+      delay: i * STAGGER + SWAP_OFFSET,
+      holds: null,
+    });
+  }
 }
 
 /** O descarte voltando a ser baralho. Um maço, não as quarenta cartas. */

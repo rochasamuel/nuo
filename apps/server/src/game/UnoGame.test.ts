@@ -276,6 +276,192 @@ describe("slap the nine", () => {
   });
 });
 
+/*
+ * A troca no 7 é a outra regra que pendura o efeito da carta — e a única em que
+ * a mesa inteira espera UMA pessoa decidir. O que se testa aqui é o que
+ * acontece antes da escolha, depois dela, e quando ela não vem.
+ */
+describe("swap on the seven", () => {
+  /** Uma mesa com a regra ligada e um 7 na mão de p0, pronto para baixar. */
+  function swapGame(playerCount = 3) {
+    const game = newGame(playerCount);
+    game.rules.sevenSwap = true;
+    setHand(game, 0, [card("seven", "red", "number", 7), filler()]);
+    return game;
+  }
+
+  it("holds the table on a seven: whoever played it owes a choice", () => {
+    const game = swapGame();
+    game.playCard("p0", "seven");
+    expect(game.swapChooserId).toBe("p0");
+    // A vez não andou: o efeito do 7 está pendurado até a escolha sair.
+    expect(game.currentPlayer!.id).toBe("p0");
+  });
+
+  it("stays out of the way when the rule is off", () => {
+    const game = newGame(3);
+    setHand(game, 0, [card("seven", "red", "number", 7), filler()]);
+    game.playCard("p0", "seven");
+    expect(game.swapChooserId).toBe("");
+    expect(game.currentPlayer!.id).toBe("p1");
+  });
+
+  it("hands over the whole hand and lets the turn move on", () => {
+    const game = swapGame();
+    setHand(game, 2, [card("a", "blue", "number", 1), card("b", "green", "number", 2)]);
+    game.playCard("p0", "seven");
+    expect(game.players[0].hand.map((c) => c.id)).toEqual(["filler"]);
+
+    game.chooseSwap("p0", "p2");
+
+    expect(game.players[0].hand.map((c) => c.id)).toEqual(["a", "b"]);
+    expect(game.players[2].hand.map((c) => c.id)).toEqual(["filler"]);
+    expect(game.swapChooserId).toBe("");
+    expect(game.currentPlayer!.id).toBe("p1");
+    expect(game.log.at(-1)).toBe("P0 trocou de mão com P2.");
+  });
+
+  /* Numa mesa de dois não há escolha a fazer: perguntar seria pedir para
+     confirmar o óbvio no meio da jogada. */
+  it("swaps without asking when there is a single opponent", () => {
+    const game = swapGame(2);
+    setHand(game, 1, [card("a", "blue", "number", 1)]);
+    game.playCard("p0", "seven");
+
+    expect(game.swapChooserId).toBe("");
+    expect(game.players[0].hand.map((c) => c.id)).toEqual(["a"]);
+    expect(game.players[1].hand.map((c) => c.id)).toEqual(["filler"]);
+    expect(game.currentPlayer!.id).toBe("p1");
+  });
+
+  it("refuses a choice that is not yours, or that lands on yourself", () => {
+    const game = swapGame();
+    game.playCard("p0", "seven");
+    expect(() => game.chooseSwap("p1", "p2")).toThrow(GameError);
+    expect(() => game.chooseSwap("p0", "p0")).toThrow(GameError);
+    expect(() => game.chooseSwap("p0", "gone")).toThrow(GameError);
+    expect(game.swapChooserId).toBe("p0");
+  });
+
+  it("refuses a choice when no seven is waiting for one", () => {
+    expect(() => swapGame().chooseSwap("p0", "p1")).toThrow(GameError);
+  });
+
+  /* Parada quer dizer parada — inclusive para quem escolhe, cuja mão está
+     justamente prestes a deixar de ser dele. */
+  it("blocks plays and draws while the choice is open", () => {
+    const game = swapGame();
+    game.playCard("p0", "seven");
+    expect(() => game.playCard("p0", "filler")).toThrow(GameError);
+    expect(() => game.drawCard("p0")).toThrow(GameError);
+    expect(() => game.playCard("p1", "whatever")).toThrow(GameError);
+    expect(game.playableCards("p0")).toEqual([]);
+  });
+
+  it("does not open on the seven that wins the game", () => {
+    const game = swapGame();
+    setHand(game, 0, [card("seven", "red", "number", 7)]);
+    game.playCard("p0", "seven");
+    expect(game.phase).toBe("finished");
+    expect(game.swapChooserId).toBe("");
+  });
+
+  /* A mão que chega ainda não foi anunciada: quem recebe uma carta só tem que
+     gritar por ELA. Sem isto, trocar seria imunidade de graça — bastava gritar
+     UNO, trocar por sete cartas e guardar o grito para a próxima. */
+  it("resets the UNO call on both sides of the swap", () => {
+    const { game, tick } = timedGame();
+    game.rules.sevenSwap = true;
+    setHand(game, 0, [card("seven", "red", "number", 7), filler(), card("x", "red", "number", 3)]);
+    setHand(game, 2, [card("last", "blue", "number", 1)]);
+    game.players[2].calledUno = true;
+
+    game.playCard("p0", "seven");
+    game.chooseSwap("p0", "p2");
+    tick(UNO_GRACE);
+
+    // p0 recebeu a mão de uma carta: exposto, e o grito antigo de p2 não o cobre.
+    expect(game.players[0].calledUno).toBe(false);
+    expect(game.players[2].calledUno).toBe(false);
+    expect(game.vulnerableId).toBe("p0");
+    expect(game.catchOpen).toBe(true);
+  });
+
+  /* A exposição acompanha a mão, e não o dono: quem se livrou da última carta
+     sai da linha de tiro, e quem a recebeu entra. */
+  it("moves the exposure along with the last card", () => {
+    const game = swapGame();
+    setHand(game, 2, [card("a", "blue", "number", 1), card("b", "green", "number", 2)]);
+
+    game.playCard("p0", "seven");
+    // Baixou a penúltima: ficou com uma carta e exposto.
+    expect(game.vulnerableId).toBe("p0");
+
+    game.chooseSwap("p0", "p2");
+    expect(game.vulnerableId).toBe("p2");
+  });
+
+  /* A rede de segurança: trocar é obrigatório, então o prazo não pode se
+     resolver em "não trocou". */
+  it("trades with the next player around when the window times out", () => {
+    const game = swapGame();
+    setHand(game, 1, [card("a", "blue", "number", 1)]);
+    game.playCard("p0", "seven");
+
+    game.timeoutSwap();
+
+    expect(game.swapChooserId).toBe("");
+    expect(game.players[0].hand.map((c) => c.id)).toEqual(["a"]);
+    expect(game.players[1].hand.map((c) => c.id)).toEqual(["filler"]);
+    expect(game.currentPlayer!.id).toBe("p1");
+  });
+
+  it("follows the direction of play when it picks for you", () => {
+    const game = swapGame();
+    game.direction = -1;
+    setHand(game, 2, [card("a", "blue", "number", 1)]);
+    game.playCard("p0", "seven");
+
+    game.timeoutSwap();
+
+    expect(game.players[0].hand.map((c) => c.id)).toEqual(["a"]);
+  });
+
+  /* Quem sai leva a troca com ele — e a vez já andou com o assento vago, então
+     aplicar o efeito do 7 aqui pularia o próximo da roda. */
+  it("drops the swap when whoever had to choose leaves the table", () => {
+    const game = swapGame();
+    game.playCard("p0", "seven");
+
+    game.removePlayer("p0");
+
+    expect(game.swapChooserId).toBe("");
+    expect(game.currentPlayer!.id).toBe("p1");
+    expect(game.phase).toBe("playing");
+  });
+
+  /* A saída pode ser a que termina a partida: se a troca não morresse junto, a
+     mesa ficaria esperando a escolha de alguém que não está mais nela. */
+  it("drops the swap when the table breaks up mid-choice", () => {
+    const game = swapGame();
+    game.playCard("p0", "seven");
+
+    game.removePlayer("p1");
+    game.removePlayer("p2");
+
+    expect(game.phase).toBe("finished");
+    expect(game.swapChooserId).toBe("");
+  });
+
+  it("names both sides of the swap for the animation", () => {
+    const game = swapGame();
+    game.playCard("p0", "seven");
+    game.takeFx();
+    game.chooseSwap("p0", "p2");
+    expect(game.takeFx()).toEqual([{ k: "swap", a: "p0", b: "p2" }]);
+  });
+});
+
 describe("draft", () => {
   it("always draws someone who is at the table", () => {
     for (let seed = 0; seed < 30; seed++) {

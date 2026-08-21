@@ -72,6 +72,16 @@ export function Table({
   const me = state.players.find((player) => player.id === sessionId);
   const canCallUno = state.phase === "playing" && hand.length === 1 && !me?.calledUno;
 
+  /*
+   * A mesa parada pela troca no 7. Ao contrário do tapa, aqui age uma pessoa só
+   * e o resto espera — então há duas telas: a de quem escolhe, com todos os
+   * assentos virados em alvo, e a de quem assiste, que só precisa saber por
+   * quem a mesa parou.
+   */
+  const swapping = state.swapChooserId !== "";
+  const iSwap = state.swapChooserId === sessionId;
+  const chooser = state.players.find((player) => player.id === state.swapChooserId);
+
   // A mesa congelada pelo tapa: ninguém joga, todo mundo bate. `mine` é se você
   // ainda deve o seu — quem já bateu só assiste os outros correrem.
   const slapping = state.slapPending.length > 0;
@@ -168,6 +178,11 @@ export function Table({
               player.id !== sessionId
             }
             onCatch={() => actions.catchUno(player.id)}
+            // Todo assento na tela é um alvo válido: você não tem assento, e
+            // qualquer outro serve. Não há alvo errado para desabilitar.
+            pickable={iSwap}
+            onPick={() => actions.swap(player.id)}
+            choosing={player.id === state.swapChooserId}
             bubble={bubbles[player.id]}
           />
         ))}
@@ -188,7 +203,10 @@ export function Table({
           // saída, mesmo com um +2 na mão para empilhar. Com o tapa aberto a
           // mesa está congelada e nem isso vale.
           disabled={
-            slapping || !yourTurn || (state.pendingDraw === 0 && playableIds.size > 0)
+            slapping ||
+            swapping ||
+            !yourTurn ||
+            (state.pendingDraw === 0 && playableIds.size > 0)
           }
           onDraw={actions.draw}
         />
@@ -240,6 +258,17 @@ export function Table({
             <span className="px-label" style={{ color: "var(--mark)" }}>
               {slap?.mine ? "Tapa no 9! Bata na carta · " : "Tapa no 9 · "}
               faltam {state.slapPending.length}
+            </span>
+          )}
+          {/* O aviso mora aqui, onde já moram os outros: é desta fileira que se
+              lê o que a mesa está esperando. Quem escolhe também precisa dele —
+              os assentos piscam lá em cima, mas quem acabou de baixar uma carta
+              está olhando para a própria mão. */}
+          {swapping && (
+            <span className="px-label" style={{ color: "var(--mark)" }}>
+              {iSwap
+                ? "Troca no 7! Escolha um jogador ▲"
+                : `Troca no 7 · ${chooser?.name ?? "alguém"} está escolhendo`}
             </span>
           )}
           {state.pendingDraw > 0 && yourTurn && (

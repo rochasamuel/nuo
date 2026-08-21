@@ -11,11 +11,30 @@ type Props = {
   /** Este jogador esqueceu o UNO e a carência já passou: dá para pegá-lo agora. */
   catchable: boolean;
   onCatch: () => void;
+  /**
+   * A troca no 7 é sua e este assento é um alvo: o quadro inteiro vira botão.
+   * Alvo grande porque a escolha é no celular, com o polegar, e porque o que se
+   * está mirando é uma pessoa — nome e número de cartas —, e não um botãozinho.
+   */
+  pickable: boolean;
+  onPick: () => void;
+  /** É ele quem está escolhendo a troca. Vale para quem assiste saber por quem espera. */
+  choosing: boolean;
   /** O que ele está dizendo agora, enquanto o balão dura. */
   bubble?: Bubble;
 };
 
-export function PlayerSeat({ player, active, isHost, catchable, onCatch, bubble }: Props) {
+export function PlayerSeat({
+  player,
+  active,
+  isHost,
+  catchable,
+  onCatch,
+  pickable,
+  onPick,
+  choosing,
+  bubble,
+}: Props) {
   // O contador só sobe quando a carta pousa: vê-lo mudar antes de a carta
   // chegar entrega que o número e o desenho são duas coisas separadas.
   const airborne = useFlightStore(heldSeatCount(player.id));
@@ -24,9 +43,13 @@ export function PlayerSeat({ player, active, isHost, catchable, onCatch, bubble 
   return (
     <div
       ref={anchorRef(`seat:${player.id}`)}
-      className={`uno-seat flex w-32 flex-col items-center gap-1 px-3 py-2 text-center ${
-        active ? "uno-seat-active" : ""
-      }`}
+      className={[
+        "uno-seat flex w-32 flex-col items-center gap-1 px-3 py-2 text-center",
+        active && "uno-seat-active",
+        pickable && "uno-seat-pick",
+      ]
+        .filter(Boolean)
+        .join(" ")}
     >
       <span className="flex w-full items-center justify-center gap-1 text-xs">
         <span
@@ -51,6 +74,14 @@ export function PlayerSeat({ player, active, isHost, catchable, onCatch, bubble 
         </span>
       )}
 
+      {/* Quem assiste precisa saber por quem a mesa está parada. Para quem
+          escolhe isto não aparece: ele não é um dos assentos. */}
+      {choosing && (
+        <span className="px-label" style={{ color: "var(--mark)" }}>
+          escolhendo<span className="px-caret">▌</span>
+        </span>
+      )}
+
       {/* Só nasce quando já dá para clicar. Mostrá-lo desabilitado durante a
           carência entregava o alvo: bastava parar o cursor ali e esperar. */}
       {catchable && (
@@ -62,6 +93,25 @@ export function PlayerSeat({ player, active, isHost, catchable, onCatch, bubble 
         >
           Pegar
         </button>
+      )}
+
+      {/*
+        A etiqueta diz o que o clique faz; quem recebe o clique é a chapa que
+        cobre o assento inteiro. Dois elementos e não um botão só porque o alvo
+        precisa ser do tamanho do quadro — e o quadro já é feito de nome,
+        contador e balão, que não podem virar filhos de um botão.
+      */}
+      {pickable && (
+        <>
+          <span className="uno-swap-chip px-label px-pop">trocar</span>
+          <button
+            type="button"
+            className="uno-swap-hit"
+            onClick={onPick}
+            aria-label={`Trocar de mão com ${player.name}, ${cardCount} cartas`}
+            title={`Trocar de mão com ${player.name}`}
+          />
+        </>
       )}
 
       {/* Pendurado no assento, e não empilhado dentro dele: os balões vão e

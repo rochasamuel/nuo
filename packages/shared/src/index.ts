@@ -52,6 +52,18 @@ export const STARTER_SPIN = 2600;
  */
 export const SLAP_TIMEOUT = 5000;
 /**
+ * Quanto tempo, em ms, a mesa espera a escolha da troca no 7 antes de escolher
+ * sozinha.
+ *
+ * É a mesma rede de segurança do tapa, mas para uma decisão de natureza
+ * oposta: o tapa é reflexo e se resolve em um segundo, enquanto escolher com
+ * quem trocar é ler a mesa inteira — quantas cartas cada um tem, quem está
+ * prestes a bater — com todo mundo esperando. Vinte segundos é folgado de
+ * propósito: quem estiver pensando não pode ser atropelado pela rede, e ela só
+ * precisa cobrir a mesa que travou porque alguém sumiu no meio da vez.
+ */
+export const SWAP_TIMEOUT = 20000;
+/**
  * Segundos que um jogador caído mantém o lugar durante a partida. Segurar o
  * lugar por muito tempo é o que trava a mesa quando a queda é na vez dele: os
  * outros ficam olhando um relógio que não é deles. Um minuto e meio é o que
@@ -82,12 +94,15 @@ export type HouseRules = {
   drawUntilPlayable: boolean;
   /** Todo 9 baixado abre uma corrida: quem bater por último compra. */
   slapNine: boolean;
+  /** Quem baixa um 7 troca a mão inteira com um jogador à sua escolha. */
+  sevenSwap: boolean;
 };
 
 export const DEFAULT_RULES: HouseRules = {
   stacking: false,
   drawUntilPlayable: false,
   slapNine: false,
+  sevenSwap: false,
 };
 
 /**
@@ -110,6 +125,11 @@ export const RULES: { key: keyof HouseRules; label: string; hint: string }[] = [
     key: "slapNine",
     label: "Tapa no 9",
     hint: "Todo 9 baixado para a mesa: todo mundo bate na carta, inclusive quem jogou. O último compra uma.",
+  },
+  {
+    key: "sevenSwap",
+    label: "Troca no 7",
+    hint: "Baixou um 7, troca a mão inteira com quem quiser da mesa. Não é opção: escolher faz parte da jogada.",
   },
 ];
 
@@ -253,6 +273,11 @@ export type TableState = {
    * caso normal: não há tapa aberto, e a mesa não está congelada.
    */
   slapPending: string[];
+  /**
+   * Quem baixou um 7 e ainda deve escolher com quem trocar. Vazio é o caso
+   * normal; preenchido é uma mesa parada esperando essa escolha.
+   */
+  swapChooserId: string;
   log: string[];
 };
 
@@ -278,6 +303,7 @@ export type JoinRoomOptions = {
 /** client -> server */
 export type PlayMessage = { cardId: string; color?: PlayColor };
 export type CatchMessage = { targetId: string };
+export type SwapMessage = { targetId: string };
 export type EmoteMessage = { emote: Emote };
 
 /** server -> client, private to a single player */
@@ -310,7 +336,13 @@ export type FxEvent =
    * bateu e a de quem perdeu — e olhando só o antes e o depois não há como
    * separá-las. Sem este evento, o tapa que decide a corrida seria mudo.
    */
-  | { k: "slap"; by: string };
+  | { k: "slap"; by: string }
+  /**
+   * As duas mãos de `a` e `b` trocaram de dono. Aqui a diferença de estado não
+   * mente — os dois contadores mudam —, mas ela não diz de onde para onde: sem
+   * este evento a mesa veria dois números novos e nenhuma carta atravessando.
+   */
+  | { k: "swap"; a: string; b: string };
 
 /** server -> client, broadcast. Vem antes do patch de estado correspondente. */
 export type FxMessage = FxEvent[];

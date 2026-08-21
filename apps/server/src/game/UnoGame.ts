@@ -50,6 +50,13 @@ export class UnoGame {
    * carta debaixo da mão de quem ainda está batendo.
    */
   slapPending: string[] = [];
+  /**
+   * Quem baixou um 7 e ainda deve dizer com quem troca. Enquanto tiver alguém
+   * aqui a mesa está parada pelo mesmo motivo do tapa — só que ao contrário:
+   * lá todo mundo age ao mesmo tempo, aqui só uma pessoa age e o resto espera.
+   * O efeito do 7 fica pendurado até a escolha sair.
+   */
+  swapChooserId = "";
   /** Player left holding one card who never said UNO. Anyone may catch them until the next action. */
   vulnerableId = "";
   /** Quando essa exposição começou, para a carência do `catchUno`. */
@@ -105,10 +112,30 @@ export class UnoGame {
     if (this.vulnerableId === id) this.vulnerableId = "";
     this.pushLog(`${gone.name} saiu.`);
 
+    /*
+     * Saiu quem tinha que escolher: a troca morre com ele.
+     *
+     * Aqui em cima, antes dos desvios, porque esta mesma saída pode ser a que
+     * termina a partida — e aí o resto do método não roda, e a mesa ficaria
+     * esperando uma escolha de alguém que não está mais nela.
+     *
+     * E sem efeito nenhum a aplicar: o 7 valia `advance()`, e é o ajuste do
+     * assento vago, logo abaixo, que move a vez — quem escolhe é sempre quem a
+     * tem. Aplicar o efeito aqui pularia o próximo da roda.
+     */
+    if (this.swapChooserId === id) {
+      this.swapChooserId = "";
+      this.pushLog("A troca no 7 não aconteceu: quem escolhia saiu da mesa.");
+    }
+
     if (this.phase !== "playing") return;
     if (this.players.length < MIN_PLAYERS) {
       this.phase = "finished";
       this.winnerId = this.players[0]?.id ?? "";
+      // O que estava pendurado não tem mais mesa onde acontecer: sem isto a
+      // tela do fim de partida ainda pediria um tapa ou uma escolha.
+      this.slapPending = [];
+      this.swapChooserId = "";
       this.pushLog("Jogadores insuficientes: a partida terminou.");
       return;
     }
@@ -128,6 +155,7 @@ export class UnoGame {
       this.slapPending.splice(owed, 1);
       this.closeSlapIfDecided();
     }
+
   }
 
   /**
@@ -156,6 +184,7 @@ export class UnoGame {
     this.drawnCardId = null;
     this.vulnerableId = "";
     this.slapPending = [];
+    this.swapChooserId = "";
     this.winnerId = "";
     this.phase = "playing";
     this.log = [];
@@ -222,8 +251,10 @@ export class UnoGame {
     if (player.hand.length > 1) player.calledUno = false;
 
     this.drawnCardId = null;
-    // O tapa segura o efeito da carta: a vez só anda quando a corrida acabar.
+    // O tapa e a troca seguram o efeito da carta: a vez só anda quando a
+    // corrida acabar, ou quando a escolha sair. Nenhuma carta abre as duas.
     if (this.opensSlap(card)) return;
+    if (this.opensSwap(card, player)) return;
     this.applyEffect(card);
   }
 
@@ -248,7 +279,48 @@ export class UnoGame {
   timeoutSlap() {
     if (this.slapPending.length === 0) return;
     this.punishSlappers(this.slapPending.splice(0), "late");
-    this.resumeAfterSlap();
+    this.resumeHeldCard();
+  }
+
+  /**
+   * A escolha. Só quem baixou o 7 escolhe, e não escolher não é uma das
+   * saídas: a mesa fica parada até sair uma.
+   */
+  chooseSwap(chooserId: string, targetId: string) {
+    if (this.swapChooserId === "") throw new GameError("Não há troca em jogo.");
+    if (this.swapChooserId !== chooserId) throw new GameError("A troca não é sua.");
+    if (chooserId === targetId) throw new GameError("Escolha outro jogador.");
+    const chooser = this.players.find((p) => p.id === chooserId)!;
+    const target = this.players.find((p) => p.id === targetId);
+    if (!target) throw new GameError("Esse jogador não está na mesa.");
+
+    this.swapChooserId = "";
+    this.swapHands(chooser, target);
+    this.resumeHeldCard();
+  }
+
+  /**
+   * A rede de segurança da troca, puxada de fora pela sala.
+   *
+   * Trocar é obrigatório, então o prazo não pode se resolver em "não trocou":
+   * seria a regra virando opcional para quem simplesmente não responde. A mesa
+   * escolhe o vizinho seguinte — o mais previsível de todos, e o único que não
+   * pede ao servidor um palpite sobre quem seria a melhor vítima.
+   */
+  timeoutSwap() {
+    if (this.swapChooserId === "") return;
+    const chooser = this.players.find((p) => p.id === this.swapChooserId);
+    this.swapChooserId = "";
+    if (!chooser) return;
+
+    const n = this.players.length;
+    const from = this.players.indexOf(chooser);
+    const next = this.players[(((from + this.direction) % n) + n) % n];
+    if (next && next !== chooser) {
+      this.pushLog(`${chooser.name} não escolheu a tempo: a troca vai para o vizinho.`);
+      this.swapHands(chooser, next);
+    }
+    this.resumeHeldCard();
   }
 
   drawCard(playerId: string) {
@@ -369,6 +441,9 @@ export class UnoGame {
     // Mesa congelada pelo tapa: nada é jogável, nem para quem tem a vez. Sem
     // isto o leque continua aceso convidando para uma jogada que será recusada.
     if (this.slapPending.length > 0) return [];
+    // Mesma coisa com a troca pendurada: nem quem escolhe pode jogar antes de
+    // escolher, e a mão dele está prestes a deixar de ser dele.
+    if (this.swapChooserId !== "") return [];
     if (this.currentPlayer?.id !== playerId) return [];
     if (this.drawnCardId !== null) {
       return player.hand.filter((c) => c.id === this.drawnCardId);
@@ -403,6 +478,13 @@ export class UnoGame {
     // A mesa está congelada pelo tapa. Deixar a vez andar aqui trocaria a carta
     // debaixo da mão de quem ainda está batendo.
     if (this.slapPending.length > 0) throw new GameError("Bata no 9 primeiro.");
+    if (this.swapChooserId !== "") {
+      throw new GameError(
+        this.swapChooserId === playerId
+          ? "Escolha com quem trocar primeiro."
+          : "Espere a troca no 7.",
+      );
+    }
     const player = this.currentPlayer;
     if (!player || player.id !== playerId) throw new GameError("Não é o seu turno.");
     return player;
@@ -458,7 +540,7 @@ export class UnoGame {
   private closeSlapIfDecided(): boolean {
     if (this.slapPending.length > 1) return false;
     this.punishSlappers(this.slapPending.splice(0), "slowest");
-    this.resumeAfterSlap();
+    this.resumeHeldCard();
     return true;
   }
 
@@ -494,12 +576,69 @@ export class UnoGame {
   }
 
   /**
-   * A mesa descongela: o 9 que ficou esperando finalmente faz efeito. Ele
-   * continua sendo o topo do descarte porque nada pôde ser jogado no meio.
+   * A mesa destrava: a carta que ficou pendurada — o 9 do tapa ou o 7 da troca
+   * — finalmente faz efeito. Ela continua sendo o topo do descarte porque nada
+   * pôde ser jogado no meio.
    */
-  private resumeAfterSlap() {
+  private resumeHeldCard() {
     if (this.phase !== "playing") return;
     this.applyEffect(this.topCard!);
+  }
+
+  /* ------------------------------------------------------------- troca no 7 */
+
+  /**
+   * Abre a troca, se a carta pedir. Devolve `true` só quando a mesa fica de
+   * fato parada esperando alguém escolher — numa mesa de dois não há escolha a
+   * fazer, e perguntar ali seria pedir para confirmar o óbvio no meio da
+   * jogada: a troca acontece na hora e o 7 segue como carta comum.
+   */
+  private opensSwap(card: Card, player: GamePlayer): boolean {
+    if (!this.rules.sevenSwap) return false;
+    if (card.type !== "number" || card.value !== 7) return false;
+
+    const others = this.players.filter((p) => p.id !== player.id);
+    if (others.length === 0) return false;
+    if (others.length === 1) {
+      this.swapHands(player, others[0]);
+      return false;
+    }
+
+    this.swapChooserId = player.id;
+    this.pushLog(`Troca no 7! ${player.name} escolhe com quem trocar.`);
+    return true;
+  }
+
+  /**
+   * As duas mãos trocam de dono. É a única jogada do baralho que mexe na mão de
+   * quem não jogou nada.
+   */
+  private swapHands(a: GamePlayer, b: GamePlayer) {
+    const hand = a.hand;
+    a.hand = b.hand;
+    b.hand = hand;
+    this.fx.push({ k: "swap", a: a.id, b: b.id });
+    this.pushLog(`${a.name} trocou de mão com ${b.name}.`);
+
+    /*
+     * Mão nova é mão nova para os dois lados: quem ficou com uma carta só ainda
+     * não gritou por ELA, e quem se livrou da última deixou de estar exposto.
+     * Sem isto a troca daria imunidade de graça — bastava gritar UNO, trocar
+     * por sete cartas e guardar o grito para a próxima vez que sobrasse uma.
+     *
+     * Com uma carta dos dois lados fica exposto quem recebeu por último: há um
+     * lugar só para o exposto, e é a mão que acabou de chegar que ninguém
+     * anunciou ainda.
+     */
+    for (const player of [a, b]) {
+      player.calledUno = false;
+      if (player.hand.length === 1) {
+        this.vulnerableId = player.id;
+        this.vulnerableSince = this.now();
+      } else if (this.vulnerableId === player.id) {
+        this.vulnerableId = "";
+      }
+    }
   }
 
   private applyEffect(card: Card) {

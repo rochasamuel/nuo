@@ -593,6 +593,62 @@ body {
   animation: px-blink 1s steps(1, end) infinite;
 }
 
+/* ---- troca no 7 ----------------------------------------------------------
+ * A única escolha do jogo que não é uma carta: é uma PESSOA. E o que decide a
+ * escolha — o nome e quantas cartas ele tem — é exatamente o que o assento já
+ * mostra, então o alvo é o quadro inteiro, e não um botãozinho dentro dele.
+ * Num celular isso é a diferença entre mirar 128x72 com o polegar e mirar 60x24.
+ *
+ * Sem lista, sem modal: duplicar a mesa numa segunda lista de nomes seria
+ * pedir para escolher olhando para um lugar que não é a mesa.
+ * ------------------------------------------------------------------------- */
+
+/* Piscar em quadros é como tudo nesta interface avisa. Aqui o pisca é entre
+   dois tons do mesmo amarelo: o assento não pode apagar no meio da escolha. */
+@keyframes uno-pick {
+  50% {
+    border-color: var(--mark-sh);
+    background: var(--slab);
+  }
+}
+.uno-seat-pick {
+  border-color: var(--mark);
+  background: var(--slab-hi);
+  cursor: pointer;
+  animation: uno-pick 0.72s steps(1, end) infinite;
+}
+
+/* A etiqueta é a chapa amarela dos botões primários, no tamanho do assento: ela
+   diz que o quadro virou botão. Quem recebe o clique é a chapa invisível de
+   baixo, então o realce de passar o mouse vem do assento, e não dela. */
+.uno-swap-chip {
+  color: var(--ink);
+  background: var(--mark);
+  border: var(--stroke) solid var(--rim);
+  box-shadow:
+    inset 2px 2px 0 var(--mark-hi),
+    inset -2px -2px 0 var(--mark-sh);
+  padding: 2px 8px;
+}
+.uno-seat-pick:hover .uno-swap-chip {
+  background: var(--mark-hi);
+}
+.uno-seat-pick:active .uno-swap-chip {
+  transform: translate(1px, 1px);
+}
+
+/* O alvo: o assento inteiro, e nem um pixel além. Crescer para fora encostaria
+   no alvo do vizinho — e trocar de mão com a pessoa errada não tem desfazer. */
+.uno-swap-hit {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  border: 0;
+  padding: 0;
+  background: none;
+  cursor: pointer;
+}
+
 /* ---- menu das regras da casa --------------------------------------------
  * Consulta, não aviso: fica fechado no cabeçalho e abre por cima da mesa sem
  * empurrar nada — o cabeçalho já se reorganiza sozinho na tela estreita, e um
@@ -781,8 +837,9 @@ body {
   .px-btn-urgent.px-pop,
   .uno-seat-active::before,
   /* O anel do tapa para de piscar, mas continua aceso: ele não é enfeite, é o
-     que diz onde bater. */
-  .uno-slap-ring {
+     que diz onde bater. O assento da troca é a mesma coisa, e diz onde clicar. */
+  .uno-slap-ring,
+  .uno-seat-pick {
     animation: none;
   }
 }

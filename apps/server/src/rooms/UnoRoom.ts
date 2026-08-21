@@ -10,6 +10,7 @@ import {
   RULES,
   SLAP_TIMEOUT,
   STARTER_SPIN,
+  SWAP_TIMEOUT,
   UNO_GRACE,
   type CatchMessage,
   type CreateRoomOptions,
@@ -20,6 +21,7 @@ import {
   type HandMessage,
   type JoinRoomOptions,
   type PlayMessage,
+  type SwapMessage,
 } from "@uno/shared";
 import { GameError, UnoGame } from "../game/UnoGame.js";
 import { CardState, PlayerState, UnoRoomState } from "./UnoState.js";
@@ -42,6 +44,8 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
   private starterTimer?: { clear: () => void };
   /** A rede de segurança do tapa no 9. Existe enquanto a corrida está aberta. */
   private slapTimer?: { clear: () => void };
+  /** O mesmo para a troca no 7, enquanto a escolha não sai. */
+  private swapTimer?: { clear: () => void };
   /** Quando cada jogador falou pela última vez, para o intervalo entre emojis. */
   private lastEmote = new Map<string, number>();
 
@@ -70,6 +74,10 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
 
     slap: (client: Client) => this.act(client, () =>
       this.game.slap(client.sessionId),
+    ),
+
+    swap: (client: Client, message: SwapMessage) => this.act(client, () =>
+      this.game.chooseSwap(client.sessionId, message?.targetId),
     ),
 
     /**
@@ -229,6 +237,7 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
     state.vulnerablePlayerId = game.vulnerableId;
     state.catchOpen = game.catchOpen;
     state.mustPlayDrawn = game.drawnCardId !== null;
+    state.swapChooserId = game.swapChooserId;
 
     if (
       state.slapPending.length !== game.slapPending.length ||
@@ -255,6 +264,7 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
 
     this.armCatchWindow();
     this.armSlapWindow();
+    this.armSwapWindow();
     this.sendFx();
     this.sendHands();
   }
@@ -299,6 +309,25 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
       this.game.timeoutSlap();
       this.sync();
     }, SLAP_TIMEOUT);
+  }
+
+  /**
+   * O prazo da escolha da troca. É da JOGADA, e não da sessão de quem escolhe:
+   * armado uma vez quando o 7 cai e desarmado quando a troca sai, de um jeito
+   * ou de outro. Reconectar no meio não compra tempo novo.
+   */
+  private armSwapWindow() {
+    if (this.game.swapChooserId === "") {
+      this.swapTimer?.clear();
+      this.swapTimer = undefined;
+      return;
+    }
+    if (this.swapTimer) return;
+    this.swapTimer = this.clock.setTimeout(() => {
+      this.swapTimer = undefined;
+      this.game.timeoutSwap();
+      this.sync();
+    }, SWAP_TIMEOUT);
   }
 
   private syncPlayers() {

@@ -33,6 +33,7 @@ export class RulesState extends Schema implements HouseRules {
   @type("boolean") stacking = false;
   @type("boolean") drawUntilPlayable = false;
   @type("boolean") slapNine = false;
+  @type("boolean") sevenSwap = false;
 }
 
 export class PlayerState extends Schema {
@@ -77,5 +78,10 @@ export class UnoRoomState extends Schema {
    * congelada: ninguém joga até a corrida acabar.
    */
   @type(["string"]) slapPending = new ArraySchema<string>();
+  /**
+   * Quem baixou um 7 e ainda deve escolher com quem trocar. Preenchido é uma
+   * mesa parada: a vez não anda, e a única ação que ela aceita é a escolha.
+   */
+  @type("string") swapChooserId = "";
   @type(["string"]) log = new ArraySchema<string>();
 }

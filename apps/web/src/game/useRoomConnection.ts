@@ -11,6 +11,7 @@ import type {
   HandMessage,
   JoinRoomOptions,
   PlayColor,
+  SwapMessage,
   TableState,
 } from "@uno/shared";
 import { client } from "../lib/colyseus";
@@ -57,6 +58,8 @@ export type RoomActions = {
   catchUno: (targetId: string) => void;
   /** Bater no 9 que está no topo do descarte. */
   slap: () => void;
+  /** Dizer com quem trocar a mão, depois de baixar um 7. */
+  swap: (targetId: string) => void;
   /** Falar com a mesa. Vale em qualquer momento, inclusive fora da sua vez. */
   emote: (emote: Emote) => void;
   restart: () => void;
@@ -235,6 +238,7 @@ export function useRoomConnection(code: string): RoomConnection {
       callUno: () => roomRef.current?.send("uno"),
       catchUno: (targetId) => roomRef.current?.send("catch", { targetId }),
       slap: () => roomRef.current?.send("slap"),
+      swap: (targetId) => roomRef.current?.send("swap", { targetId } satisfies SwapMessage),
       emote: (emote) => roomRef.current?.send("emote", { emote } satisfies EmoteMessage),
       restart: () => roomRef.current?.send("restart"),
     }),
