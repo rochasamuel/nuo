@@ -593,6 +593,31 @@ body {
   animation: px-blink 1s steps(1, end) infinite;
 }
 
+/* A setinha entre dois assentos: para que lado a vez corre. O cabeçalho já diz
+   "horário" com todas as letras — esta é para quem está olhando a mesa e não o
+   cabeçalho. Fica no tom apagado do papel, e não no amarelo de ênfase: lê-se de
+   relance sem disputar com o assento da vez, que é o que a mesa tem de mais
+   urgente para dizer.
+
+   Margem de topo fixa, e não `align-self: center`: a altura do assento cresce
+   quando nasce o "Pegar" ou o "UNO!", e a seta centrada subiria e desceria
+   junto. 32px a põe na linha do contador de cartas, onde ela fica em qualquer
+   estado. A margem lateral negativa come parte do gap dos dois lados, para ela
+   pertencer ao par de assentos em vez de flutuar entre eles. */
+.uno-flow {
+  margin-top: 32px;
+  margin-inline: -6px;
+  font-size: 16px;
+  line-height: 16px;
+  color: var(--paper-sh);
+  user-select: none;
+}
+/* A seta que caiu no fim de uma fileira: o vizinho para quem ela aponta está na
+   linha de baixo. Guarda o lugar (ver useLineStarts em Table.tsx) e cala. */
+.uno-flow-wrapped {
+  visibility: hidden;
+}
+
 /* ---- troca no 7 ----------------------------------------------------------
  * A única escolha do jogo que não é uma carta: é uma PESSOA. E o que decide a
  * escolha — o nome e quantas cartas ele tem — é exatamente o que o assento já
@@ -812,6 +837,30 @@ body {
   border: 0;
   background: none;
   cursor: pointer;
+}
+
+/* ---- barra do /mock ------------------------------------------------------
+ * A lista de interruptores cresce a cada regra da casa e já não cabe numa tela
+ * de notebook. A barra ganha altura de janela e rolagem própria — e a rolagem,
+ * como todo o resto, é feita do material dos painéis: chapa quadrada, traço de
+ * 2px, sem cantos redondos e sem desfoque.
+ * ------------------------------------------------------------------------- */
+
+.uno-mock-panel {
+  scrollbar-color: var(--gloss) var(--slab-sh);
+}
+.uno-mock-panel::-webkit-scrollbar {
+  width: 10px;
+}
+.uno-mock-panel::-webkit-scrollbar-track {
+  background: var(--slab-sh);
+}
+.uno-mock-panel::-webkit-scrollbar-thumb {
+  background: var(--gloss);
+  border: var(--stroke) solid var(--rim);
+}
+.uno-mock-panel::-webkit-scrollbar-thumb:hover {
+  background: var(--mark);
 }
 
 /* ---- movimento reduzido -------------------------------------------------- */

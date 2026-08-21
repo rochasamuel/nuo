@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { COLOR_NAME, isWild, type Card, type PlayColor, type TableState } from "@uno/shared";
 import type { RoomActions, RoomConnection } from "../game/useRoomConnection";
 import { flyPlay, handCardPose, markLeaving, type Pose } from "../game/flights";
@@ -68,6 +68,7 @@ export function Table({
 
   const yourTurn = state.currentPlayerId === sessionId && state.phase === "playing";
   const seats = seatOrder(state, sessionId);
+  const [seatRow, lineStarts] = useLineStarts(seats.length);
   const current = state.players.find((player) => player.id === state.currentPlayerId);
   const me = state.players.find((player) => player.id === sessionId);
   const canCallUno = state.phase === "playing" && hand.length === 1 && !me?.calledUno;
@@ -165,26 +166,54 @@ export function Table({
         </span>
       </header>
 
-      <section className="flex flex-wrap items-start justify-center gap-4">
-        {seats.map((player) => (
-          <PlayerSeat
-            key={player.id}
-            player={player}
-            active={player.id === state.currentPlayerId}
-            isHost={player.id === state.hostId}
-            catchable={
-              state.catchOpen &&
-              state.vulnerablePlayerIds.includes(player.id) &&
-              player.id !== sessionId
-            }
-            onCatch={() => actions.catchUno(player.id)}
-            // Todo assento na tela é um alvo válido: você não tem assento, e
-            // qualquer outro serve. Não há alvo errado para desabilitar.
-            pickable={iSwap}
-            onPick={() => actions.swap(player.id)}
-            choosing={player.id === state.swapChooserId}
-            bubble={bubbles[player.id]}
-          />
+      {/*
+        A fileira é sempre a ordem do array de jogadores começando depois de
+        você — o que muda com o inverter não é a ordem dos assentos, é para que
+        lado a vez corre por eles. Daí a setinha entre um assento e o outro: ela
+        aponta para quem joga depois. Quem quer a palavra lê "horário" no
+        cabeçalho, quem só quer saber de quem é a vez seguinte segue a seta.
+
+        No celular ela não aparece: ali os assentos já quebram em várias
+        fileiras, e uma seta a cada par cobra a largura de que o nome precisa
+        para não ser cortado. O cabeçalho continua dizendo o sentido por
+        extenso.
+      */}
+      {/* A folga entre fileiras encolhe no celular; a horizontal não: são os
+          16px de que o ▶ da vez precisa à esquerda do assento. */}
+      <section
+        ref={seatRow}
+        className="flex flex-wrap items-start justify-center gap-x-4 gap-y-2 sm:gap-y-4"
+      >
+        {seats.map((player, index) => (
+          <Fragment key={player.id}>
+            {index > 0 && (
+              <span
+                className={`uno-flow hidden sm:block ${
+                  lineStarts.includes(index) ? "uno-flow-wrapped" : ""
+                }`}
+                aria-hidden="true"
+              >
+                {state.direction === 1 ? "→" : "←"}
+              </span>
+            )}
+            <PlayerSeat
+              player={player}
+              active={player.id === state.currentPlayerId}
+              isHost={player.id === state.hostId}
+              catchable={
+                state.catchOpen &&
+                state.vulnerablePlayerIds.includes(player.id) &&
+                player.id !== sessionId
+              }
+              onCatch={() => actions.catchUno(player.id)}
+              // Todo assento na tela é um alvo válido: você não tem assento, e
+              // qualquer outro serve. Não há alvo errado para desabilitar.
+              pickable={iSwap}
+              onPick={() => actions.swap(player.id)}
+              choosing={player.id === state.swapChooserId}
+              bubble={bubbles[player.id]}
+            />
+          </Fragment>
         ))}
       </section>
 
@@ -360,6 +389,52 @@ export function Table({
       )}
     </div>
   );
+}
+
+/**
+ * Quais assentos abrem uma fileira nova, para a seta que vem antes deles poder
+ * sumir: ela apontaria para um vizinho que está na linha de baixo, e no fim da
+ * fileira ela lê como enfeite pendurado na borda.
+ *
+ * Some por `visibility`, e não deixando de ser desenhada: tirá-la do fluxo
+ * devolveria a largura dela à fileira, o que pode caber mais um assento, o que
+ * muda a quebra, o que remede — e a seta piscaria para sempre. Invisível, ela
+ * guarda o lugar e a medida se estabiliza na primeira passada.
+ *
+ * O custo é um ResizeObserver e uma varredura de `offsetTop` a cada vez que a
+ * fileira muda de tamanho: nada roda por quadro nem por jogada.
+ */
+function useLineStarts(seatCount: number) {
+  const ref = useRef<HTMLElement>(null);
+  const [starts, setStarts] = useState<number[]>([]);
+
+  useLayoutEffect(() => {
+    const row = ref.current;
+    if (!row) return;
+
+    const measure = () => {
+      const seats = row.querySelectorAll<HTMLElement>(".uno-seat");
+      const next: number[] = [];
+      seats.forEach((seat, index) => {
+        const previous = seats[index - 1];
+        if (previous && seat.offsetTop > previous.offsetTop) next.push(index);
+      });
+      // Só troca o estado quando a quebra de fato mudou — senão cada resize
+      // seria um render novo com a mesma resposta.
+      setStarts((current) =>
+        current.length === next.length && current.every((value, i) => value === next[i])
+          ? current
+          : next,
+      );
+    };
+
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(row);
+    return () => observer.disconnect();
+  }, [seatCount]);
+
+  return [ref, starts] as const;
 }
 
 /** Opponents in turn order starting after you; you are not drawn as a seat. */

@@ -44,28 +44,62 @@ export function PlayerSeat({
     <div
       ref={anchorRef(`seat:${player.id}`)}
       className={[
-        "uno-seat flex w-32 flex-col items-center gap-1 px-3 py-2 text-center",
+        // No celular o assento é uma faixa baixa: nome e contador dividem uma
+        // linha só. Com dez lugares na mesa é a altura da fileira que come a
+        // tela, e o que sobra dela é a mesa. A largura não encolhe junto — o
+        // nome precisa caber, e é ele que diz de quem é o assento.
+        "uno-seat flex w-32 flex-col items-center gap-1 px-2 py-1 text-center",
+        "sm:px-3 sm:py-2",
         active && "uno-seat-active",
         pickable && "uno-seat-pick",
       ]
         .filter(Boolean)
         .join(" ")}
     >
-      <span className="flex w-full items-center justify-center gap-1 text-xs">
+      {/*
+        Duas coisas curtas — quem é, quanto tem — e duas maneiras de arrumá-las.
+        No celular elas dividem a linha e se leem como um placar: nome à
+        esquerda, contador preso à direita pelo `ml-auto`, o que alinha os
+        números de um assento para o outro. Empilhá-las lá dobraria a altura da
+        fileira, que é justamente o que falta na tela pequena.
+
+        De `sm` para cima sobra largura e falta motivo para apertar: o
+        `basis-full` joga o contador para a linha de baixo e o assento volta a
+        ser o quadrado centrado de sempre, com o nome inteiro à disposição.
+      */}
+      {/* `flex-nowrap` no celular: numa linha que pode quebrar, o flex quebra
+          antes de encolher, e o nome comprido mandaria o contador para baixo em
+          vez de cortar. De `sm` para cima a quebra é justamente o que põe o
+          contador na sua própria linha. */}
+      <span className="flex w-full flex-nowrap items-center justify-center gap-1 text-xs sm:flex-wrap">
         <span
-          className="inline-block size-2"
+          className="inline-block size-2 shrink-0"
           style={{ background: player.connected ? "var(--green)" : "var(--gloss)" }}
           title={player.connected ? "conectado" : "desconectado"}
         />
-        {isHost && <span title="host">👑</span>}
-        <span className="truncate" style={{ color: "var(--paper-hi)" }}>
+        {isHost && (
+          <span className="shrink-0" title="host">
+            👑
+          </span>
+        )}
+        {/* `min-w-0` para o nome poder encolher: sem ele um "Ana Beatriz" se
+            recusa a cortar e empurra o contador para a linha de baixo, que é
+            justamente a linha que o celular não tem. */}
+        <span
+          className="min-w-0 truncate"
+          title={player.name}
+          style={{ color: "var(--paper-hi)" }}
+        >
           {player.name}
         </span>
-      </span>
 
-      <span className="flex items-center gap-1 text-xs" style={{ color: "var(--paper-sh)" }}>
-        <img src={BACK_URL} alt="" className="h-5 w-auto" />
-        {cardCount}
+        <span
+          className="ml-auto flex shrink-0 items-center gap-1 sm:ml-0 sm:basis-full sm:justify-center"
+          style={{ color: "var(--paper-sh)" }}
+        >
+          <img src={BACK_URL} alt="" className="h-4 w-auto sm:h-5" />
+          {cardCount}
+        </span>
       </span>
 
       {player.calledUno && cardCount === 1 && (

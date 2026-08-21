@@ -266,7 +266,13 @@ export function MockScreen() {
         onExit={() => setFinished(false)}
       />
 
-      <div className="px-slab fixed top-16 right-4 z-30 flex w-56 flex-col gap-3 p-3">
+      {/*
+        A barra cresce a cada regra nova e já passa da dobra num notebook: daí a
+        altura presa à janela e a rolagem própria. `top-16` mais a folga de
+        baixo são as 5rem que saem do cálculo. `overscroll-contain` para que
+        chegar ao fim da lista não puxe a página atrás — que é a mesa.
+      */}
+      <div className="px-slab uno-mock-panel fixed top-16 right-4 z-30 flex max-h-[calc(100dvh-5rem)] w-56 flex-col gap-3 overflow-y-auto overscroll-contain p-3">
         <p className="px-label">Mock</p>
 
         <Slider label="Cartas na mão" value={handSize} min={1} max={30} onChange={dealHand} />
