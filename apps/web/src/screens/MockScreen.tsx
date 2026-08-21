@@ -13,7 +13,7 @@ import {
 import { FlightLayer } from "../components/FlightLayer";
 import { StarterRoulette } from "../components/StarterRoulette";
 import { Table } from "../components/Table";
-import { flyDeal, flyDraw, flySwap } from "../game/flights";
+import { flyDeal, flyDraw, flyRotate, flySwap } from "../game/flights";
 import type { RoomActions } from "../game/useRoomConnection";
 
 /**
@@ -63,6 +63,7 @@ export function MockScreen() {
   const [drawUntilPlayable, setDrawUntilPlayable] = useState(false);
   const [slapNine, setSlapNine] = useState(true);
   const [sevenSwap, setSevenSwap] = useState(true);
+  const [zeroRotate, setZeroRotate] = useState(true);
   /** Quem ainda deve o tapa. Vazio é o caso normal. */
   const [slapPending, setSlapPending] = useState<string[]>([]);
   /** Quem deve escolher a troca no 7. Vazio é o caso normal. */
@@ -112,7 +113,7 @@ export function MockScreen() {
       hostId: ME,
       phase: finished ? "finished" : "playing",
       maxPlayers: 10,
-      rules: { stacking, drawUntilPlayable, slapNine, sevenSwap },
+      rules: { stacking, drawUntilPlayable, slapNine, sevenSwap, zeroRotate },
       players,
       currentPlayerId: ME,
       // Sem sorteio em curso: em /mock a roleta é um botão da barra lateral.
@@ -124,7 +125,7 @@ export function MockScreen() {
       discardCount: 26,
       discard,
       winnerId: finished ? "p2" : "",
-      vulnerablePlayerId: "p1",
+      vulnerablePlayerIds: ["p1"],
       catchOpen,
       mustPlayDrawn,
       slapPending,
@@ -153,6 +154,7 @@ export function MockScreen() {
     stacking,
     swapChooserId,
     wildOnTop,
+    zeroRotate,
   ]);
 
   // Metade das cartas jogáveis, para ver as duas aparências no mesmo leque —
@@ -279,6 +281,7 @@ export function MockScreen() {
         />
         <Toggle label="Tapa no 9" on={slapNine} onClick={() => setSlapNine((v) => !v)} />
         <Toggle label="Troca no 7" on={sevenSwap} onClick={() => setSevenSwap((v) => !v)} />
+        <Toggle label="Roda no 0" on={zeroRotate} onClick={() => setZeroRotate((v) => !v)} />
         <Toggle label="Coringa no topo" on={wildOnTop} onClick={() => setWildOnTop((v) => !v)} />
         <Toggle label="Pegar liberado" on={catchOpen} onClick={() => setCatchOpen((v) => !v)} />
         <Toggle label="Comprou, pode passar" on={mustPlayDrawn} onClick={() => setMustPlayDrawn((v) => !v)} />
@@ -329,6 +332,20 @@ export function MockScreen() {
           onClick={() => flySwap(state.players[1].id, state.players[2].id)}
         >
           Trocar no 7 · entre outros
+        </button>
+        {/* A roda inteira, na direção que a mesa está correndo — é o único jeito
+            de rever a volta sem esperar um 0 cair numa partida de verdade. */}
+        <button
+          type="button"
+          className="px-btn"
+          onClick={() => {
+            const seats = state.players.map((player) =>
+              player.id === ME ? null : player.id,
+            );
+            flyRotate(state.direction === 1 ? seats : [seats[0], ...seats.slice(1).reverse()]);
+          }}
+        >
+          Rodar no 0
         </button>
         <p className="px-label">
           Clique numa carta para jogar; no monte para comprar. A compra pendente

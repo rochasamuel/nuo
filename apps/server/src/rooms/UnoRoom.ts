@@ -23,6 +23,7 @@ import {
   type PlayMessage,
   type SwapMessage,
 } from "@uno/shared";
+import type { ArraySchema } from "@colyseus/schema";
 import { GameError, UnoGame } from "../game/UnoGame.js";
 import { CardState, PlayerState, UnoRoomState } from "./UnoState.js";
 
@@ -234,18 +235,12 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
     state.pendingDraw = game.pendingDraw;
     state.deckCount = game.deck.length;
     state.winnerId = game.winnerId;
-    state.vulnerablePlayerId = game.vulnerableId;
+    syncList(state.vulnerablePlayerIds, game.vulnerable);
     state.catchOpen = game.catchOpen;
     state.mustPlayDrawn = game.drawnCardId !== null;
     state.swapChooserId = game.swapChooserId;
 
-    if (
-      state.slapPending.length !== game.slapPending.length ||
-      game.slapPending.some((id, i) => state.slapPending[i] !== id)
-    ) {
-      state.slapPending.splice(0);
-      state.slapPending.push(...game.slapPending);
-    }
+    syncList(state.slapPending, game.slapPending);
 
     this.syncPlayers();
 
@@ -288,7 +283,7 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
   private armCatchWindow() {
     this.graceTimer?.clear();
     this.graceTimer = undefined;
-    if (!this.game.vulnerableId || this.game.catchOpen) return;
+    if (this.game.vulnerable.length === 0 || this.game.catchOpen) return;
     this.graceTimer = this.clock.setTimeout(() => this.sync(), UNO_GRACE);
   }
 
@@ -377,6 +372,17 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
     await this.presence.sadd(LOBBY_CHANNEL, id);
     return id;
   }
+}
+
+/**
+ * Espelha uma lista de ids no estado sincronizado, e só quando ela de fato
+ * mudou: reescrevê-la a cada `sync` mandaria um patch para a mesa inteira a
+ * cada jogada, para dizer que nada mudou.
+ */
+function syncList(target: ArraySchema<string>, source: string[]) {
+  if (target.length === source.length && source.every((id, i) => target[i] === id)) return;
+  target.splice(0);
+  target.push(...source);
 }
 
 function sanitize(value: unknown, fallback: string, maxLength: number): string {

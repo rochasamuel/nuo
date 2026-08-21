@@ -31,8 +31,19 @@ const RECYCLE_CARDS = 3;
  * e travessia se lê em fila, não em carta solta.
  */
 const SWAP_CARDS = 4;
+/** Quantos versos passam de mão em mão em cada passagem da roda do 0. */
+const ROTATE_CARDS = 3;
 /**
- * Quanto o maço da troca encolhe ao chegar num assento.
+ * Atraso entre uma passagem e a seguinte na roda.
+ *
+ * As mãos andam todas no mesmo instante, mas desenhá-las assim seria um estalo:
+ * dez filas nascendo juntas não se leem como uma roda, e sim como confusão.
+ * Escalonado pela ordem do jogo, o movimento CORRE a mesa a partir de quem
+ * baixou o 0 — que é exatamente o que a regra faz.
+ */
+const ROTATE_RIPPLE = 45;
+/**
+ * Quanto o maço encolhe ao chegar num assento, nos voos entre jogadores.
  *
  * Não é o `SEAT_SCALE` das compras, e de propósito: aquele é o tamanho de uma
  * carta que vai VIRAR parte da pilha do assento, e por isso pousa do tamanho
@@ -41,7 +52,7 @@ const SWAP_CARDS = 4;
  * o gesto que se está desenhando, e ele tem que ser visto do outro lado — sem
  * virar um maço que cobre os dois assentos quando eles são vizinhos.
  */
-const SWAP_SCALE = 0.4;
+const HOP_SCALE = 0.4;
 /** Meia passada de atraso no maço que volta, para os dois lerem como duas filas. */
 const SWAP_OFFSET = 35;
 /**
@@ -329,6 +340,14 @@ function cardWidth() {
  */
 export const handCardPose = (index: number) => handSlot(cardWidth(), index);
 
+/**
+ * A ponta de um voo entre jogadores: o assento do outro, ou o seu leque — você
+ * não tem assento, e quem representa a sua mão é a ponta direita do leque, que
+ * é por onde uma carta entra nela.
+ */
+const hopPose = (seat: string | null, width: number) =>
+  seat ? center(`seat:${seat}`, 0, HOP_SCALE) : handSlot(width);
+
 /* ------------------------------------------------------------------ disparos */
 
 /** Cartas saindo do monte para uma mão ou para um assento. */
@@ -443,11 +462,9 @@ export function flyPlay(
 export function flySwap(a: string | null, b: string | null) {
   if (reduced()) return;
   const width = cardWidth();
-  const pose = (seat: string | null) =>
-    seat ? center(`seat:${seat}`, 0, SWAP_SCALE) : handSlot(width);
 
-  const from = pose(a);
-  const to = pose(b);
+  const from = hopPose(a, width);
+  const to = hopPose(b, width);
   for (let i = 0; i < SWAP_CARDS; i++) {
     launch({ from, to, width, art: BACK_URL, delay: i * STAGGER, holds: null });
     launch({
@@ -459,6 +476,36 @@ export function flySwap(a: string | null, b: string | null) {
       holds: null,
     });
   }
+}
+
+/**
+ * A roda do 0: a mesa inteira andando uma casa.
+ *
+ * `ids` vem na ordem do jogo, com a direção já aplicada — cada um entrega ao
+ * seguinte da lista, e o último ao primeiro. `null` é você, e como você não tem
+ * assento, a sua ponta é o leque.
+ *
+ * O escalonamento por posição é o que separa esta animação da troca no 7: lá
+ * são dois maços cruzando, aqui é um movimento só que dá a volta na mesa.
+ */
+export function flyRotate(ids: (string | null)[]) {
+  if (reduced()) return;
+  const width = cardWidth();
+  const poses = ids.map((seat) => hopPose(seat, width));
+
+  poses.forEach((from, i) => {
+    const to = poses[(i + 1) % poses.length];
+    for (let card = 0; card < ROTATE_CARDS; card++) {
+      launch({
+        from,
+        to,
+        width,
+        art: BACK_URL,
+        delay: i * ROTATE_RIPPLE + card * STAGGER,
+        holds: null,
+      });
+    }
+  });
 }
 
 /** O descarte voltando a ser baralho. Um maço, não as quarenta cartas. */

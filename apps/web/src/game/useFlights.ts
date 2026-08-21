@@ -1,7 +1,15 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { toCard, type FxEvent, type TableState } from "@uno/shared";
 import { artUrl, scatter } from "../lib/cards";
-import { clearFlights, flyDeal, flyDraw, flyPlay, flyRecycle, flySwap } from "./flights";
+import {
+  clearFlights,
+  flyDeal,
+  flyDraw,
+  flyPlay,
+  flyRecycle,
+  flyRotate,
+  flySwap,
+} from "./flights";
 import type { RoomConnection } from "./useRoomConnection";
 
 type Deal = { seat: string | null; count: number };
@@ -136,6 +144,8 @@ function dispatch(event: FxEvent, sessionId: string, awaiting: Pending[]) {
         event.a === sessionId ? null : event.a,
         event.b === sessionId ? null : event.b,
       );
+    case "rotate":
+      return flyRotate(event.ids.map((id) => (id === sessionId ? null : id)));
     case "slap":
       // Não é um voo: nenhuma carta se move. Quem escuta é a mesa, que toca o
       // som do tapa. Aqui só se reconhece o evento.

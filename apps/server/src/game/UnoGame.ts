@@ -57,8 +57,16 @@ export class UnoGame {
    * O efeito do 7 fica pendurado até a escolha sair.
    */
   swapChooserId = "";
-  /** Player left holding one card who never said UNO. Anyone may catch them until the next action. */
-  vulnerableId = "";
+  /**
+   * Quem está com uma carta na mão sem ter gritado UNO. Qualquer outro pode
+   * pegá-los até a próxima ação da mesa.
+   *
+   * Lista, e não um nome: a roda do 0 troca todas as mãos de uma vez e pode
+   * deixar três pessoas com uma carta só no mesmo instante. Com um lugar
+   * apenas, duas delas ganhariam imunidade de graça — e ninguém ganha imunidade
+   * por sorte do sorteio de quem foi escrito por último.
+   */
+  vulnerable: string[] = [];
   /** Quando essa exposição começou, para a carência do `catchUno`. */
   vulnerableSince = 0;
   winnerId = "";
@@ -94,7 +102,7 @@ export class UnoGame {
    * impede o adversário de vencer a corrida só por já estar com o dedo no lugar.
    */
   get catchOpen(): boolean {
-    return this.vulnerableId !== "" && this.now() - this.vulnerableSince >= UNO_GRACE;
+    return this.vulnerable.length > 0 && this.now() - this.vulnerableSince >= UNO_GRACE;
   }
 
   addPlayer(id: string, name: string) {
@@ -109,7 +117,7 @@ export class UnoGame {
     if (index === -1) return;
     const [gone] = this.players.splice(index, 1);
     this.deck.unshift(...gone.hand);
-    if (this.vulnerableId === id) this.vulnerableId = "";
+    this.vulnerable = this.vulnerable.filter((exposed) => exposed !== id);
     this.pushLog(`${gone.name} saiu.`);
 
     /*
@@ -182,7 +190,7 @@ export class UnoGame {
     this.currentIndex = drafted === -1 ? 0 : drafted;
     this.pendingDraw = 0;
     this.drawnCardId = null;
-    this.vulnerableId = "";
+    this.vulnerable = [];
     this.slapPending = [];
     this.swapChooserId = "";
     this.winnerId = "";
@@ -228,7 +236,7 @@ export class UnoGame {
       throw new GameError("Escolha uma cor válida.");
     }
 
-    this.vulnerableId = "";
+    this.vulnerable = [];
     player.hand.splice(index, 1);
     this.discard.push(card);
     this.fx.push({ k: "play", by: player.id });
@@ -245,7 +253,7 @@ export class UnoGame {
       return;
     }
     if (player.hand.length === 1 && !player.calledUno) {
-      this.vulnerableId = player.id;
+      this.vulnerable = [player.id];
       this.vulnerableSince = this.now();
     }
     if (player.hand.length > 1) player.calledUno = false;
@@ -255,6 +263,8 @@ export class UnoGame {
     // corrida acabar, ou quando a escolha sair. Nenhuma carta abre as duas.
     if (this.opensSlap(card)) return;
     if (this.opensSwap(card, player)) return;
+    // A roda não interrompe nada: acontece na hora e a vez segue logo atrás.
+    this.rotateOnZero(card);
     this.applyEffect(card);
   }
 
@@ -325,7 +335,7 @@ export class UnoGame {
 
   drawCard(playerId: string) {
     const player = this.requireTurn(playerId);
-    this.vulnerableId = "";
+    this.vulnerable = [];
 
     if (this.pendingDraw > 0) {
       const taken = this.take(this.pendingDraw);
@@ -408,7 +418,7 @@ export class UnoGame {
       throw new GameError("Grite UNO assim que ficar com uma carta.");
     }
     player.calledUno = true;
-    if (this.vulnerableId === playerId) this.vulnerableId = "";
+    this.vulnerable = this.vulnerable.filter((exposed) => exposed !== playerId);
     this.pushLog(`${player.name} gritou UNO!`);
   }
 
@@ -418,7 +428,7 @@ export class UnoGame {
     if (!this.players.some((p) => p.id === accuserId)) {
       throw new GameError("Você não está nesta partida.");
     }
-    if (this.vulnerableId !== targetId) {
+    if (!this.vulnerable.includes(targetId)) {
       throw new GameError("Não há ninguém para pegar.");
     }
     if (!this.catchOpen) {
@@ -429,7 +439,9 @@ export class UnoGame {
     target.hand.push(...taken);
     if (taken.length > 0) this.fx.push({ k: "draw", to: target.id, n: taken.length });
     target.calledUno = false;
-    this.vulnerableId = "";
+    // Só ele sai da linha de tiro. Depois de uma roda no 0 pode haver mais de
+    // um exposto, e pegar um não é o que absolve os outros.
+    this.vulnerable = this.vulnerable.filter((exposed) => exposed !== targetId);
     this.pushLog(`${target.name} esqueceu o UNO e comprou ${UNO_PENALTY}.`);
   }
 
@@ -566,7 +578,7 @@ export class UnoGame {
       // Comprar tira quem estava com uma carta só da linha de tiro, exatamente
       // como em qualquer outra compra.
       player.calledUno = false;
-      if (this.vulnerableId === player.id) this.vulnerableId = "";
+      this.vulnerable = this.vulnerable.filter((exposed) => exposed !== player.id);
       this.pushLog(
         why === "slowest"
           ? `${player.name} bateu por último e comprou uma carta.`
@@ -620,25 +632,58 @@ export class UnoGame {
     this.fx.push({ k: "swap", a: a.id, b: b.id });
     this.pushLog(`${a.name} trocou de mão com ${b.name}.`);
 
-    /*
-     * Mão nova é mão nova para os dois lados: quem ficou com uma carta só ainda
-     * não gritou por ELA, e quem se livrou da última deixou de estar exposto.
-     * Sem isto a troca daria imunidade de graça — bastava gritar UNO, trocar
-     * por sete cartas e guardar o grito para a próxima vez que sobrasse uma.
-     *
-     * Com uma carta dos dois lados fica exposto quem recebeu por último: há um
-     * lugar só para o exposto, e é a mão que acabou de chegar que ninguém
-     * anunciou ainda.
-     */
-    for (const player of [a, b]) {
+    this.reexpose([a, b]);
+  }
+
+  /* ---------------------------------------------------------------- roda no 0 */
+
+  /**
+   * A mesa inteira anda uma casa: cada um passa a mão para o próximo, no
+   * sentido em que o jogo está correndo.
+   *
+   * Ao contrário do 7, aqui não há nada a escolher — a direção já decide tudo
+   * —, então nada congela e nada fica pendurado: a roda acontece dentro da
+   * própria jogada e a vez segue logo depois.
+   */
+  private rotateOnZero(card: Card) {
+    if (!this.rules.zeroRotate) return;
+    if (card.type !== "number" || card.value !== 0) return;
+    const n = this.players.length;
+    if (n < 2) return;
+
+    // Na ordem do jogo, a partir de quem baixou: cada um entrega ao seguinte
+    // desta fila, e o último ao primeiro. É a mesma fila que a mesa anima.
+    const order = Array.from(
+      { length: n },
+      (_, step) => this.players[(((this.currentIndex + this.direction * step) % n) + n) % n],
+    );
+    const hands = order.map((player) => player.hand);
+    order.forEach((player, i) => {
+      player.hand = hands[(i - 1 + n) % n];
+    });
+
+    this.fx.push({ k: "rotate", ids: order.map((player) => player.id) });
+    this.pushLog("Roda no 0! Todo mundo passou a mão para o próximo.");
+    this.reexpose(this.players);
+  }
+
+  /**
+   * Republica quem está exposto depois de mãos mudarem de dono.
+   *
+   * Mão nova é mão nova: quem ficou com uma carta só ainda não gritou por ELA,
+   * e quem se livrou da última deixou de estar exposto. Sem isto, trocar daria
+   * imunidade de graça — bastava gritar UNO, trocar por sete cartas e guardar o
+   * grito para a próxima vez que sobrasse uma.
+   */
+  private reexpose(changed: GamePlayer[]) {
+    for (const player of changed) {
       player.calledUno = false;
-      if (player.hand.length === 1) {
-        this.vulnerableId = player.id;
-        this.vulnerableSince = this.now();
-      } else if (this.vulnerableId === player.id) {
-        this.vulnerableId = "";
-      }
+      this.vulnerable = this.vulnerable.filter((exposed) => exposed !== player.id);
+      if (player.hand.length === 1) this.vulnerable.push(player.id);
     }
+    // A carência conta da mão que acabou de chegar, e não da jogada que a
+    // trouxe: a corrida para gritar começa agora, para todos ao mesmo tempo.
+    this.vulnerableSince = this.now();
   }
 
   private applyEffect(card: Card) {

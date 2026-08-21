@@ -174,7 +174,7 @@ export function Table({
             isHost={player.id === state.hostId}
             catchable={
               state.catchOpen &&
-              state.vulnerablePlayerId === player.id &&
+              state.vulnerablePlayerIds.includes(player.id) &&
               player.id !== sessionId
             }
             onCatch={() => actions.catchUno(player.id)}

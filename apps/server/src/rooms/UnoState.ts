@@ -34,6 +34,7 @@ export class RulesState extends Schema implements HouseRules {
   @type("boolean") drawUntilPlayable = false;
   @type("boolean") slapNine = false;
   @type("boolean") sevenSwap = false;
+  @type("boolean") zeroRotate = false;
 }
 
 export class PlayerState extends Schema {
@@ -68,7 +69,11 @@ export class UnoRoomState extends Schema {
   @type("uint16") discardCount = 0;
   @type([CardState]) discard = new ArraySchema<CardState>();
   @type("string") winnerId = "";
-  @type("string") vulnerablePlayerId = "";
+  /**
+   * Quem está com uma carta na mão sem ter gritado UNO. Lista: a roda do 0
+   * expõe todo mundo que ficou com uma carta só, e são vários de uma vez.
+   */
+  @type(["string"]) vulnerablePlayerIds = new ArraySchema<string>();
   /** A carência passou: os outros já podem pegar quem está exposto. */
   @type("boolean") catchOpen = false;
   /** The current player drew a playable card: they may play that one card or pass. */

@@ -383,7 +383,7 @@ describe("swap on the seven", () => {
     // p0 recebeu a mão de uma carta: exposto, e o grito antigo de p2 não o cobre.
     expect(game.players[0].calledUno).toBe(false);
     expect(game.players[2].calledUno).toBe(false);
-    expect(game.vulnerableId).toBe("p0");
+    expect(game.vulnerable).toEqual(["p0"]);
     expect(game.catchOpen).toBe(true);
   });
 
@@ -395,10 +395,10 @@ describe("swap on the seven", () => {
 
     game.playCard("p0", "seven");
     // Baixou a penúltima: ficou com uma carta e exposto.
-    expect(game.vulnerableId).toBe("p0");
+    expect(game.vulnerable).toEqual(["p0"]);
 
     game.chooseSwap("p0", "p2");
-    expect(game.vulnerableId).toBe("p2");
+    expect(game.vulnerable).toEqual(["p2"]);
   });
 
   /* A rede de segurança: trocar é obrigatório, então o prazo não pode se
@@ -459,6 +459,127 @@ describe("swap on the seven", () => {
     game.takeFx();
     game.chooseSwap("p0", "p2");
     expect(game.takeFx()).toEqual([{ k: "swap", a: "p0", b: "p2" }]);
+  });
+});
+
+/*
+ * A roda do 0 é a irmã da troca no 7, com a escolha tirada: quem decide é a
+ * direção. Nada congela e nada fica pendurado — o que se testa aqui é para que
+ * lado as mãos andam, e o que sobra do UNO quando a mesa inteira troca de mão.
+ */
+describe("rotate on the zero", () => {
+  /** Uma mesa com a regra ligada e um 0 na mão de p0, pronto para baixar. */
+  function zeroGame(playerCount = 3) {
+    const game = newGame(playerCount);
+    game.rules.zeroRotate = true;
+    setHand(game, 0, [card("zero", "red", "number", 0), filler()]);
+    return game;
+  }
+
+  /** As mãos da mesa, por assento, para comparar a volta inteira de uma vez. */
+  const hands = (game: UnoGame) => game.players.map((p) => p.hand.map((c) => c.id));
+
+  it("walks every hand one seat along, in play order", () => {
+    const game = zeroGame();
+    setHand(game, 1, [card("b", "blue", "number", 1), card("c", "blue", "number", 2)]);
+    setHand(game, 2, [card("d", "green", "number", 3)]);
+
+    game.playCard("p0", "zero");
+
+    // p0 entregou ao p1, p1 ao p2, p2 ao p0 — e p0 baixou o 0 antes de entregar.
+    expect(hands(game)).toEqual([["d"], ["filler"], ["b", "c"]]);
+    // Nada ficou pendurado: a vez andou na mesma jogada.
+    expect(game.currentPlayer!.id).toBe("p1");
+  });
+
+  it("walks the other way when the table is running backwards", () => {
+    const game = zeroGame();
+    game.direction = -1;
+    setHand(game, 1, [card("b", "blue", "number", 1)]);
+    setHand(game, 2, [card("d", "green", "number", 3), card("e", "green", "number", 4)]);
+
+    game.playCard("p0", "zero");
+
+    // Anti-horário: p0 entrega ao p2, p2 ao p1, p1 ao p0.
+    expect(hands(game)).toEqual([["b"], ["d", "e"], ["filler"]]);
+    expect(game.currentPlayer!.id).toBe("p2");
+  });
+
+  it("stays out of the way when the rule is off", () => {
+    const game = newGame(3);
+    setHand(game, 0, [card("zero", "red", "number", 0), filler()]);
+    setHand(game, 1, [card("b", "blue", "number", 1)]);
+    game.playCard("p0", "zero");
+    expect(hands(game)[1]).toEqual(["b"]);
+  });
+
+  /* Com dois na mesa a roda é a troca: o próximo e o anterior são a mesma
+     pessoa, e é assim que a regra tem que se comportar. */
+  it("is a straight swap at a table of two", () => {
+    const game = zeroGame(2);
+    setHand(game, 1, [card("b", "blue", "number", 1)]);
+    game.playCard("p0", "zero");
+    expect(hands(game)).toEqual([["b"], ["filler"]]);
+  });
+
+  it("does not rotate on the zero that wins the game", () => {
+    const game = zeroGame();
+    setHand(game, 0, [card("zero", "red", "number", 0)]);
+    setHand(game, 1, [card("b", "blue", "number", 1)]);
+    game.playCard("p0", "zero");
+    expect(game.phase).toBe("finished");
+    expect(hands(game)[1]).toEqual(["b"]);
+  });
+
+  /* O caso que a lista de expostos existe para atender: a roda pode deixar
+     meia mesa com uma carta na mão no mesmo instante, e com um lugar só as
+     outras ganhariam imunidade de graça. */
+  it("exposes everyone left holding a single card, all at once", () => {
+    const { game, tick } = timedGame();
+    game.rules.zeroRotate = true;
+    setHand(game, 0, [card("zero", "red", "number", 0), filler()]);
+    setHand(game, 1, [card("b", "blue", "number", 1)]);
+    setHand(game, 2, [card("d", "green", "number", 3)]);
+    game.players[1].calledUno = true;
+
+    game.playCard("p0", "zero");
+    tick(UNO_GRACE);
+
+    expect(hands(game)).toEqual([["d"], ["filler"], ["b"]]);
+    expect(game.vulnerable).toEqual(["p0", "p1", "p2"]);
+    // O grito antigo não cobre a mão nova.
+    expect(game.players.map((p) => p.calledUno)).toEqual([false, false, false]);
+    expect(game.catchOpen).toBe(true);
+  });
+
+  /* Pegar um não absolve os outros: cada mão exposta é uma cobrança própria. */
+  it("catches the exposed one by one", () => {
+    const { game, tick } = timedGame();
+    game.rules.zeroRotate = true;
+    setHand(game, 0, [card("zero", "red", "number", 0), filler()]);
+    setHand(game, 1, [card("b", "blue", "number", 1)]);
+    setHand(game, 2, [card("d", "green", "number", 3)]);
+
+    game.playCard("p0", "zero");
+    tick(UNO_GRACE);
+    game.catchUno("p1", "p0");
+
+    expect(game.vulnerable).toEqual(["p1", "p2"]);
+    expect(game.players[0].hand).toHaveLength(1 + UNO_PENALTY);
+    // E gritar continua salvando quem gritou, sem mexer no resto.
+    game.callUno("p1");
+    expect(game.vulnerable).toEqual(["p2"]);
+  });
+
+  it("names the order of the rotation for the animation", () => {
+    const game = zeroGame();
+    game.direction = -1;
+    game.takeFx();
+    game.playCard("p0", "zero");
+    expect(game.takeFx()).toEqual([
+      { k: "play", by: "p0" },
+      { k: "rotate", ids: ["p0", "p2", "p1"] },
+    ]);
   });
 });
 
@@ -815,12 +936,12 @@ describe("uno", () => {
     const { game, tick } = timedGame();
     setHand(game, 0, [card("x", "red", "number", 3), card("y", "blue", "number", 4)]);
     game.playCard("p0", "x");
-    expect(game.vulnerableId).toBe("p0");
+    expect(game.vulnerable).toEqual(["p0"]);
 
     tick(UNO_GRACE);
     game.catchUno("p1", "p0");
     expect(game.players[0].hand).toHaveLength(3);
-    expect(game.vulnerableId).toBe("");
+    expect(game.vulnerable).toEqual([]);
   });
 
   it("holds the catch during the grace, so camping the button cannot win the race", () => {
@@ -858,10 +979,10 @@ describe("uno", () => {
     const game = newGame(3);
     setHand(game, 0, [card("x", "red", "number", 3), card("y", "blue", "number", 4)]);
     game.playCard("p0", "x");
-    expect(game.vulnerableId).toBe("p0");
+    expect(game.vulnerable).toEqual(["p0"]);
 
     game.callUno("p0");
-    expect(game.vulnerableId).toBe("");
+    expect(game.vulnerable).toEqual([]);
     expect(() => game.catchUno("p1", "p0")).toThrow(/ninguém para pegar/);
   });
 
@@ -871,7 +992,7 @@ describe("uno", () => {
     expect(() => game.callUno("p0")).toThrow(/assim que ficar com uma carta/);
 
     game.playCard("p0", "x");
-    expect(game.vulnerableId).toBe("p0"); // sem o atalho, ele fica exposto
+    expect(game.vulnerable).toEqual(["p0"]); // sem o atalho, ele fica exposto
   });
 
   it("refuses a repeated call, so spamming the button does nothing", () => {

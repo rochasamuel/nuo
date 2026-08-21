@@ -96,6 +96,8 @@ export type HouseRules = {
   slapNine: boolean;
   /** Quem baixa um 7 troca a mão inteira com um jogador à sua escolha. */
   sevenSwap: boolean;
+  /** Todo 0 baixado passa a mesa inteira: cada mão vai para o próximo jogador. */
+  zeroRotate: boolean;
 };
 
 export const DEFAULT_RULES: HouseRules = {
@@ -103,6 +105,7 @@ export const DEFAULT_RULES: HouseRules = {
   drawUntilPlayable: false,
   slapNine: false,
   sevenSwap: false,
+  zeroRotate: false,
 };
 
 /**
@@ -130,6 +133,11 @@ export const RULES: { key: keyof HouseRules; label: string; hint: string }[] = [
     key: "sevenSwap",
     label: "Troca no 7",
     hint: "Baixou um 7, troca a mão inteira com quem quiser da mesa. Não é opção: escolher faz parte da jogada.",
+  },
+  {
+    key: "zeroRotate",
+    label: "Roda no 0",
+    hint: "Baixou um 0, a mesa inteira anda: cada um passa a mão para o próximo, no sentido em que o jogo está correndo.",
   },
 ];
 
@@ -264,7 +272,11 @@ export type TableState = {
   discardCount: number;
   discard: PublicCard[];
   winnerId: string;
-  vulnerablePlayerId: string;
+  /**
+   * Quem está com uma carta na mão sem ter gritado UNO. Lista, e não um nome:
+   * a roda do 0 pode deixar meia mesa com uma carta só no mesmo instante.
+   */
+  vulnerablePlayerIds: string[];
   /** A carência passou: os outros já podem pegar quem está exposto. */
   catchOpen: boolean;
   mustPlayDrawn: boolean;
@@ -342,7 +354,13 @@ export type FxEvent =
    * mente — os dois contadores mudam —, mas ela não diz de onde para onde: sem
    * este evento a mesa veria dois números novos e nenhuma carta atravessando.
    */
-  | { k: "swap"; a: string; b: string };
+  | { k: "swap"; a: string; b: string }
+  /**
+   * A mesa inteira andou uma casa: cada `id` desta lista passou a mão para o
+   * seguinte, e o último para o primeiro. Vem na ordem do jogo, já com a
+   * direção aplicada — quem anima não precisa saber para que lado a mesa corre.
+   */
+  | { k: "rotate"; ids: string[] };
 
 /** server -> client, broadcast. Vem antes do patch de estado correspondente. */
 export type FxMessage = FxEvent[];
