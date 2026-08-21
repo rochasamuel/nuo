@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { BACK_URL } from "../lib/cards";
+import { isLowMotion } from "../store/ui";
 
 /**
  * O voo de uma carta entre dois pontos da mesa.
@@ -241,8 +242,8 @@ const timers = new Set<ReturnType<typeof setTimeout>>();
 /** Até quando o monte de compra está ocupado, para o que vem depois esperar a vez. */
 let busyUntil = 0;
 
-const reduced = () =>
-  typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+/* O sistema ou a chave da mesa: ver `isLowMotion` no store/ui. */
+const reduced = isLowMotion;
 
 function hold(kind: Hold, taking: boolean) {
   if (!kind) return;

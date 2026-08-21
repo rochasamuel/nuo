@@ -23,7 +23,9 @@ export function RulesMenu({ rules }: Props) {
   const on = RULES.filter(({ key }) => rules[key]).length;
 
   return (
-    <details className="uno-rules">
+    // O `name` emparelha este painel com o de ajustes: abrir um fecha o outro,
+    // porque os dois caem no mesmo canto da barra.
+    <details className="uno-rules" name="uno-header">
       <summary className="px-link" aria-label="Regras da casa">
         {/* A conta no rótulo é o que se quer saber de relance: se a mesa tem
             alguma variação de pé. Abrir é para descobrir quais. */}

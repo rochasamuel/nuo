@@ -32,6 +32,7 @@ export type StoredSetup = {
 const sessionKey = (code: string) => `uno:session:${code}`;
 const NAME_KEY = "uno:name";
 const SETUP_KEY = "uno:setup";
+const PREFS_KEY = "uno:prefs";
 
 export function loadSession(code: string): StoredSession | null {
   try {
@@ -90,5 +91,38 @@ export function loadSetup(): StoredSetup {
     rules: Object.fromEntries(
       RULES.map(({ key }) => [key, stored.rules?.[key] === true]),
     ) as HouseRules,
+  };
+}
+
+/**
+ * O que a pessoa ajustou na mesa — não o combinado da partida, que é do
+ * servidor, mas como ela quer VER a mesa. Fica aqui pelo mesmo motivo que o
+ * nome: quem desliga o movimento uma vez não quer religá-lo toda sexta.
+ */
+export type SeatLayout = "row" | "ring";
+export type StoredPrefs = {
+  seatLayout: SeatLayout;
+  lowMotion: boolean;
+};
+
+export function savePrefs(prefs: StoredPrefs) {
+  localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
+}
+
+/** Campo a campo e sempre válido, como o `loadSetup` logo acima. */
+export function loadPrefs(): StoredPrefs {
+  const fallback: StoredPrefs = { seatLayout: "row", lowMotion: false };
+
+  let stored: Partial<StoredPrefs>;
+  try {
+    stored = JSON.parse(localStorage.getItem(PREFS_KEY) ?? "") as Partial<StoredPrefs>;
+  } catch {
+    return fallback;
+  }
+  if (!stored || typeof stored !== "object") return fallback;
+
+  return {
+    seatLayout: stored.seatLayout === "ring" ? "ring" : "row",
+    lowMotion: stored.lowMotion === true,
   };
 }

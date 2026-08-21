@@ -618,6 +618,65 @@ body {
   visibility: hidden;
 }
 
+/* ---- a mesa redonda ------------------------------------------------------
+ * A mesma mesa, com os assentos em roda em volta das pilhas em vez de em
+ * fileira no topo. É opção do cabeçalho e só existe em tela grande — quem liga
+ * a classe é a `Table`, que já precisa saber da largura para calcular as
+ * posições (ver `ringLayout` lá).
+ *
+ * O CSS não sabe onde fica cada assento: ele recebe --x e --y prontos, em
+ * porcentagem desta caixa. O que é dele é o TAMANHO da roda, que é o que sobrou
+ * de tela — e é justamente o que o JavaScript não deve adivinhar.
+ * ------------------------------------------------------------------------- */
+
+.uno-arena-ring {
+  position: relative;
+}
+
+/*
+ * A caixa da elipse. Recuada por meio assento de cada lado (o assento tem
+ * 128px e nasce centrado no seu ponto), senão os das pontas do arco sairiam
+ * pela borda da mesa. Em cima, o recuo é para o balão do emoji e o "Pegar" de
+ * quem se esqueceu do UNO caberem sem encostar no cabeçalho.
+ *
+ * Fora do fluxo: as pilhas passam a ter a caixa inteira e se centram nela, que
+ * é o centro da roda. Na fileira normal esta regra não existe e as duas voltam
+ * a ser duas faixas empilhadas.
+ */
+.uno-arena-ring > .uno-seats {
+  position: absolute;
+  inset: 40px 72px 48px;
+  display: block;
+  /* Acima das pilhas, abaixo da camada de voo (30). Numa tela de notebook com
+     a mesa cheia o assento de cima raspa no descarte, e entre esconder um nome
+     e cobrir a quina de uma carta, some a quina: o nome é o que se lê para
+     saber de quem é a vez, e o "Pegar" e o "Trocar" são alvos de clique. */
+  z-index: 5;
+}
+
+/* A cadeira: some do layout na fileira, carrega o assento na roda. */
+.uno-chair {
+  display: contents;
+}
+.uno-arena-ring .uno-chair {
+  display: block;
+  position: absolute;
+  left: var(--x);
+  top: var(--y);
+  transform: translate(-50%, -50%);
+}
+
+/* A seta do sentido, agora no ponto do arco entre dois assentos. Sem as
+   margens da fileira: lá elas a alinhavam com o contador de cartas do vizinho,
+   aqui o lugar dela é o ponto e mais nada. */
+.uno-arena-ring .uno-flow {
+  position: absolute;
+  left: var(--x);
+  top: var(--y);
+  margin: 0;
+  transform: translate(-50%, -50%);
+}
+
 /* ---- troca no 7 ----------------------------------------------------------
  * A única escolha do jogo que não é uma carta: é uma PESSOA. E o que decide a
  * escolha — o nome e quantas cartas ele tem — é exatamente o que o assento já
@@ -706,6 +765,34 @@ body {
   z-index: 35;
   width: max-content;
   max-width: min(88vw, 340px);
+}
+
+/* O interruptor dos ajustes: uma linha inteira que é botão. Herda a fonte e a
+   cor de quem o contém — o que se vê são o quadradinho e o texto, como nas
+   regras da casa ao lado; o botão em si não tem chapa nem borda. */
+.uno-switch {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+/* Preenchido é ligada, vazado é desligada — o mesmo ponto das regras da casa e
+   da conexão nos assentos. Quem diz qual dos dois é o `aria-checked`. */
+.uno-switch-dot {
+  background: transparent;
+  border: 2px solid var(--gloss);
+}
+.uno-switch[aria-checked="true"] .uno-switch-dot {
+  background: var(--mark);
+}
+.uno-switch-label {
+  color: var(--gloss);
+}
+.uno-switch[aria-checked="true"] .uno-switch-label,
+.uno-switch:hover .uno-switch-label {
+  color: var(--paper-hi);
 }
 
 /* ---- teclado da conversa -------------------------------------------------
@@ -863,9 +950,14 @@ body {
   background: var(--mark);
 }
 
-/* ---- movimento reduzido -------------------------------------------------- */
+/* ---- movimento reduzido --------------------------------------------------
+ * Numa CLASSE do <html>, e não na media query: a chave do sistema é uma só
+ * para o computador inteiro, e esta mesa também tem a sua, nos ajustes do
+ * cabeçalho. Quem soma as duas e liga a classe é o `syncMotionClass` no
+ * store/ui — a media query continua valendo, agora lida por lá.
+ * ------------------------------------------------------------------------- */
 
-@media (prefers-reduced-motion: reduce) {
+.motion-off {
   .uno-card,
   .uno-slot {
     transition: none;

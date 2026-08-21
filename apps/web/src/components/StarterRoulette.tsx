@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { STARTER_SPIN, type PublicPlayer } from "@uno/shared";
 import { useSound } from "../lib/sound";
+import { isLowMotion } from "../store/ui";
 
 type Props = {
   /** A mesa, na ordem dos assentos: é por ela que o rolo passa. */
@@ -125,5 +126,5 @@ function spinGaps(playerCount: number): number[] {
   return weights.map((weight) => ((STARTER_SPIN - REST) * weight) / total);
 }
 
-const reducedMotion = () =>
-  typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+/* O sistema ou a chave da mesa: ver `isLowMotion` no store/ui. */
+const reducedMotion = isLowMotion;
