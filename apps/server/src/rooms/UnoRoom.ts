@@ -53,6 +53,17 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
   messages = {
     start: (client: Client) => this.act(client, () => this.draft(client)),
 
+    /*
+     * "Me conta de novo onde estamos."
+     *
+     * O celular congela a aba quando a tela apaga ou quem joga sai para mandar
+     * o convite, e a mesa volta do congelamento exibindo o quadro em que
+     * parou. Enquanto o socket sobreviveu não há nada que reescreva esse
+     * quadro: o Colyseus só manda o que MUDOU, e o que mudou já passou. Este
+     * pedido é o cliente dizendo que não confia mais no que tem na tela.
+     */
+    resync: (client: Client) => this.resync(client),
+
     play: (client: Client, message: PlayMessage) => this.act(client, () =>
       this.game.playCard(client.sessionId, message?.cardId, message?.color),
     ),
@@ -179,11 +190,71 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
     } catch (error) {
       if (error instanceof GameError) {
         client.send("error", { message: error.message } satisfies ErrorMessage);
+        /*
+         * Uma recusa é a única pista que o servidor tem de que a tela de quem
+         * tentou pode estar contando outra história — e, sem isto, era uma
+         * pista jogada fora: a mesa dele seguia igual, o toque seguinte era
+         * recusado igual, e uma divergência que devia durar um quadro durava
+         * a partida inteira. Uma mesa travou assim, esperando uma jogadora que
+         * via um botão apagado onde o servidor via a vez dela.
+         *
+         * O estado não mudou, então isto não corrige o servidor: corrige o
+         * cliente, que é onde a divergência mora.
+         */
+        this.diagnose(client, error);
+        this.resync(client);
         return;
       }
       throw error;
     }
     this.sync();
+  }
+
+  /**
+   * Reescreve a mesa de UM cliente: o estado público inteiro e a mão dele.
+   *
+   * O estado inteiro, e não um remendo, porque o que se está consertando é
+   * justamente não saber o que ele tem — o Colyseus manda diferenças, e uma
+   * diferença sobre uma base errada continua errada.
+   */
+  private resync(client: Client) {
+    /*
+     * O mesmo caminho que o Colyseus percorre quando alguém entra ou reconecta,
+     * só que sob demanda. É interno, daí a guarda: se uma versão futura mudar o
+     * nome, a mão sozinha ainda conserta o leque — e é o leque que decide o que
+     * a tela deixa tocar.
+     */
+    try {
+      (this as unknown as { sendFullState(target: Client): void }).sendFullState(client);
+    } catch {
+      // segue só com a mão
+    }
+    this.sendHandTo(client);
+  }
+
+  /**
+   * O rastro da divergência, para o servidor e não para a mesa.
+   *
+   * Recusar a ação de quem NÃO tem a vez é o jogo funcionando — chega o tempo
+   * todo, de toque adiantado e de clique duplo. Recusar a ação de quem TEM a
+   * vez é outra coisa: a tela dele ofereceu algo que o jogo não aceita, e é
+   * essa a linha que vale a pena existir no log quando a mesa travar de novo.
+   */
+  private diagnose(client: Client, error: GameError) {
+    if (this.game.currentPlayer?.id !== client.sessionId) return;
+    console.warn(
+      `[uno ${this.roomId}] recusa na vez de ${client.sessionId}: ${error.message}`,
+      {
+        phase: this.game.phase,
+        pendingDraw: this.game.pendingDraw,
+        drawnCardId: this.game.drawnCardId,
+        playable: this.game.playableCards(client.sessionId).map((c) => c.id),
+        hand: this.game.players.find((p) => p.id === client.sessionId)?.hand.length,
+        slapPending: this.game.slapPending.length,
+        swapChooserId: this.game.swapChooserId,
+        rules: this.game.rules,
+      },
+    );
   }
 
   /**
@@ -349,14 +420,17 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
   }
 
   private sendHands() {
-    for (const client of this.clients) {
-      const player = this.game.players.find((p) => p.id === client.sessionId);
-      if (!player) continue;
-      client.send("hand", {
-        cards: player.hand,
-        playableIds: this.game.playableCards(player.id).map((c) => c.id),
-      } satisfies HandMessage);
-    }
+    for (const client of this.clients) this.sendHandTo(client);
+  }
+
+  /** A metade privada da mesa, para um cliente só. Quem não joga não tem mão. */
+  private sendHandTo(client: Client) {
+    const player = this.game.players.find((p) => p.id === client.sessionId);
+    if (!player) return;
+    client.send("hand", {
+      cards: player.hand,
+      playableIds: this.game.playableCards(player.id).map((c) => c.id),
+    } satisfies HandMessage);
   }
 
   /** Short, shareable room codes instead of the default random ids. */

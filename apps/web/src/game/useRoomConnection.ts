@@ -121,7 +121,9 @@ export function useRoomConnection(code: string): RoomConnection {
         if (!alive.current) return void room.leave();
         attach(room, playerName);
       } catch (cause) {
-        clearSession(code);
+        // Sem `clearSession`: uma entrada nova que falhou não diz nada sobre um
+        // lugar guardado de antes, e apagar o token aqui fecharia a única porta
+        // que ainda pode abrir. Quem sai de fato apaga o dele em `leave`.
         setError(joinError(cause));
         setStatus("naming");
       }
@@ -154,14 +156,13 @@ export function useRoomConnection(code: string): RoomConnection {
       setError("");
 
       if (saved?.reconnectionToken) {
-        try {
-          const room = await client.reconnect(saved.reconnectionToken);
-          if (!alive.current) return void room.leave();
-          return attach(room, saved.playerName);
-        } catch {
-          clearSession(code);
-          if (!alive.current) return;
-        }
+        const room = await reclaimSeat(saved.reconnectionToken, () => alive.current);
+        if (!alive.current) return void room?.leave();
+        if (room) return attach(room, saved.playerName);
+        // O token NÃO é descartado aqui. Falhar em reclamar o lugar não prova
+        // que ele acabou — prova que não deu desta vez —, e é o token a única
+        // porta que existe: a sala fica trancada enquanto a partida corre, e
+        // sem ele o "tentar novamente" bate numa porta que nunca abre.
       }
 
       if (!name) return setStatus("naming");
@@ -203,6 +204,18 @@ export function useRoomConnection(code: string): RoomConnection {
   useEffect(() => {
     const recover = () => {
       if (document.visibilityState !== "visible") return;
+      /*
+       * A mesa que sobreviveu ao congelamento volta exibindo o quadro em que
+       * parou: o Colyseus manda o que MUDOU, e o que mudou passou enquanto a
+       * aba dormia. Pedir tudo de novo custa uma mensagem e é a diferença
+       * entre uma tela velha e uma tela certa — quem olha para ela não tem
+       * como desconfiar, e uma tela velha já travou uma mesa inteira.
+       */
+      try {
+        roomRef.current?.send("resync");
+      } catch {
+        // socket já morto: o `connect` abaixo é quem cuida deste caso
+      }
       void connect();
     };
     document.addEventListener("visibilitychange", recover);
@@ -275,6 +288,31 @@ export function useRoomConnection(code: string): RoomConnection {
     onFx,
     onEmote,
   };
+}
+
+/**
+ * Quanto esperar entre uma tentativa de reclamar o lugar e a seguinte.
+ *
+ * Recarregar a página é uma corrida: o navegador fecha o socket e a mesa
+ * renasce no quadro seguinte, cedo demais para o servidor já ter registrado a
+ * reserva do assento. Uma tentativa só perdia essa corrida — e o preço de
+ * perdê-la era a partida, porque a sala está trancada e não há segunda porta.
+ * Três tentativas em pouco mais de um segundo cobrem a corrida sem fazer
+ * ninguém esperar por um assento que de fato acabou.
+ */
+const RECLAIM_BACKOFF = [0, 400, 1200];
+
+async function reclaimSeat(token: string, alive: () => boolean): Promise<Room | null> {
+  for (const wait of RECLAIM_BACKOFF) {
+    if (wait > 0) await new Promise((done) => setTimeout(done, wait));
+    if (!alive()) return null;
+    try {
+      return await client.reconnect(token);
+    } catch {
+      // ainda não; a próxima volta tenta de novo
+    }
+  }
+  return null;
 }
 
 function joinError(cause: unknown): string {

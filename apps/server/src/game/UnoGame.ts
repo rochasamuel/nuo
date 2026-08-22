@@ -333,11 +333,17 @@ export class UnoGame {
     this.resumeHeldCard();
   }
 
+  /*
+   * Tudo o que pode recusar vem antes de tudo o que muda: a sala só sincroniza
+   * a mesa depois de a ação passar, então um estado mexido no caminho de um
+   * `throw` fica só no servidor — e a tela de quem tentou continua contando a
+   * versão antiga, sem nada que a corrija.
+   */
   drawCard(playerId: string) {
     const player = this.requireTurn(playerId);
-    this.vulnerable = [];
 
     if (this.pendingDraw > 0) {
+      this.vulnerable = [];
       const taken = this.take(this.pendingDraw);
       player.hand.push(...taken);
       if (taken.length > 0) this.fx.push({ k: "draw", to: player.id, n: taken.length });
@@ -355,6 +361,8 @@ export class UnoGame {
     if (player.hand.some((c) => this.isLegal(c))) {
       throw new GameError("Você tem carta jogável: só compre quando não puder jogar.");
     }
+
+    this.vulnerable = [];
 
     // Uma carta, ou até vir uma que sirva. A busca sempre termina: o monte é
     // finito e o descarte só se recicla enquanto tiver o que reciclar.

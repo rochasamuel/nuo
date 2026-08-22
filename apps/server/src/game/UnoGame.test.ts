@@ -916,6 +916,31 @@ describe("drawing", () => {
     expect(game.currentPlayer!.id).toBe("p1");
   });
 
+  /*
+   * Uma compra recusada não pode ter mexido em nada: a sala só sincroniza
+   * depois de a ação passar, então o que mudar antes de um `throw` vira uma
+   * diferença entre servidor e mesa que ninguém corrige.
+   */
+  it("leaves the table untouched when the draw is refused", () => {
+    const game = newGame(3);
+    setHand(game, 0, [card("x", "red", "number", 3), filler()]);
+    game.vulnerable = ["p1"];
+
+    expect(() => game.drawCard("p0")).toThrow(/só compre quando não puder jogar/);
+    expect(game.vulnerable).toEqual(["p1"]);
+  });
+
+  it("leaves the table untouched when the draw is refused after another draw", () => {
+    const game = newGame(3);
+    setHand(game, 0, [card("other", "blue", "number", 2)]);
+    game.deck = [card("d", "red", "number", 9)];
+    game.drawCard("p0");
+    game.vulnerable = ["p1"];
+
+    expect(() => game.drawCard("p0")).toThrow(/já comprou/);
+    expect(game.vulnerable).toEqual(["p1"]);
+  });
+
   it("recycles the discard pile when the deck runs out", () => {
     const game = newGame(3);
     setHand(game, 0, []);
