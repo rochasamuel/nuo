@@ -162,6 +162,24 @@ export function HomeScreen() {
           Entrar
         </button>
       </form>
+
+      {/*
+        O crédito fecha a porta de entrada, e mora só aqui: na mesa ele
+        disputaria o canto com a vez de alguém, e a mesa é para jogar. No tom
+        mais apagado da folha — quem vem abrir uma partida não veio ler um
+        nome, mas quem for procurar acha.
+      */}
+      <footer className="px-label flex flex-wrap items-baseline justify-center gap-x-2">
+        <span>desenvolvido por</span>
+        <a
+          className="px-link px-credit"
+          href="https://github.com/rochasamuel"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Samuel Rocha ↗
+        </a>
+      </footer>
     </main>
   );
 }

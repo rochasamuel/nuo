@@ -211,6 +211,26 @@ body {
   color: var(--paper);
 }
 
+/*
+ * O crédito no rodapé da porta de entrada.
+ *
+ * Um link precisa dizer que é um link PARADO: no celular não há hover que o
+ * revele, e no tom do rótulo à esquerda o nome se lê como mais uma palavra da
+ * frase. O sublinhado é o mesmo traço de 2px que faz toda borda desta
+ * interface, e a folga é a mesma grade de 4px — nada de novo entrou no
+ * sistema, só um traço onde ele faltava.
+ */
+.px-credit {
+  color: var(--paper-sh);
+  padding: 4px 0;
+  border-bottom: var(--stroke) solid var(--gloss);
+}
+.px-credit:hover,
+.px-credit:focus-visible {
+  color: var(--mark);
+  border-bottom-color: var(--mark);
+}
+
 /* ---- campo: relevo invertido, como um sulco ------------------------------ */
 
 .px-input {
