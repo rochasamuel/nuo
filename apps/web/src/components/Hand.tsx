@@ -156,14 +156,31 @@ function HandCard({
   );
 }
 
-/** Cards that were not in the hand on the previous render, so they can flip in. */
+const NO_CARDS: ReadonlySet<string> = new Set();
+
+/**
+ * Cards that were not in the hand on the previous render, so they can flip in.
+ *
+ * O leque redesenha a cada patch da mesa, e quase nenhum deles tem a ver com
+ * as suas cartas: um adversário comprou, a vez andou, alguém falou. Sem carta
+ * nova nada é construído e nada é lembrado de novo — o caso comum, que é o
+ * caso de quase sempre, não custa nada.
+ */
 function useFreshCards(cards: Card[]) {
   const known = useRef<Set<string>>(new Set());
-  const fresh = new Set(cards.filter((card) => !known.current.has(card.id)).map((c) => c.id));
+  const first = known.current.size === 0;
+
+  let fresh: Set<string> | null = null;
+  for (const card of cards) {
+    if (!known.current.has(card.id)) (fresh ??= new Set()).add(card.id);
+  }
 
   useEffect(() => {
+    // Nada novo e o mesmo tamanho é a mesma mão, carta por carta: não há o que
+    // reescrever.
+    if (!fresh && known.current.size === cards.length) return;
     known.current = new Set(cards.map((card) => card.id));
   });
 
-  return known.current.size === 0 ? new Set<string>() : fresh;
+  return first || !fresh ? NO_CARDS : fresh;
 }

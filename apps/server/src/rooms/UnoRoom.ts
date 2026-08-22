@@ -49,6 +49,10 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
   private swapTimer?: { clear: () => void };
   /** Quando cada jogador falou pela última vez, para o intervalo entre emojis. */
   private lastEmote = new Map<string, number>();
+  /** A última mão que cada cliente recebeu, para não reenviar a mesma. */
+  private sentHands = new Map<string, string>();
+  /** Até que linha do log a mesa já foi espelhada. Ver `syncLog`. */
+  private sentLogSeq = 0;
 
   messages = {
     start: (client: Client) => this.act(client, () => this.draft(client)),
@@ -150,6 +154,9 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
 
   onDrop(client: Client) {
     this.connected.delete(client.sessionId);
+    // Quem volta pode ser uma página nova, de leque vazio: o que ele já recebeu
+    // não vale mais como aposta.
+    this.sentHands.delete(client.sessionId);
     this.sync();
     // Guardar o lugar é também o que mantém a sala viva: o Colyseus só descarta
     // uma sala sem clientes quando não há mais nenhuma reserva pendente.
@@ -167,6 +174,7 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
   onLeave(client: Client, _code: CloseCode) {
     this.connected.delete(client.sessionId);
     this.lastEmote.delete(client.sessionId);
+    this.sentHands.delete(client.sessionId);
     this.game.removePlayer(client.sessionId);
     if (this.state.hostId === client.sessionId) {
       this.state.hostId = this.game.players[0]?.id ?? "";
@@ -229,7 +237,7 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
     } catch {
       // segue só com a mão
     }
-    this.sendHandTo(client);
+    this.sendHandTo(client, true);
   }
 
   /**
@@ -315,18 +323,8 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
 
     this.syncPlayers();
 
-    if (state.discardCount !== game.discard.length) {
-      state.discardCount = game.discard.length;
-      state.discard.splice(0);
-      for (const card of game.discard.slice(-VISIBLE_DISCARD)) {
-        state.discard.push(CardState.from(card));
-      }
-    }
-
-    if (state.log.length !== game.log.length || state.log.at(-1) !== game.log.at(-1)) {
-      state.log.splice(0);
-      state.log.push(...game.log);
-    }
+    this.syncDiscard();
+    this.syncLog();
 
     this.armCatchWindow();
     this.armSlapWindow();
@@ -396,6 +394,76 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
     }, SWAP_TIMEOUT);
   }
 
+  /**
+   * A ponta visível do descarte, escrita pelo fim.
+   *
+   * O caso comum é uma carta a mais no topo. Reescrever as oito para anunciar
+   * uma custava oito objetos de esquema novos e um patch que apagava e
+   * recriava a lista inteira — a cada jogada, para a mesa toda. Aqui entra o
+   * que entrou e sai da frente o que saiu da janela.
+   *
+   * O que não cresce por uma carta não é jogada: é o reembaralhar, ou uma
+   * partida nova. Aí não há trecho comum a aproveitar e a lista se reescreve,
+   * que é o que ela sempre fez.
+   */
+  private syncDiscard() {
+    const { discard } = this.game;
+    const grew = discard.length - this.state.discardCount;
+    /*
+     * Mesma altura E mesmo topo é a mesma pilha. Só a altura não bastava:
+     * uma revanche logo depois de um reembaralhar começa com uma carta, que é
+     * exatamente quantas o reembaralhar deixou — e a mesa continuava mostrando
+     * a carta da partida anterior, porque o número não tinha mexido.
+     */
+    if (grew === 0 && this.state.discard.at(-1)?.id === discard.at(-1)?.id) return;
+
+    this.state.discardCount = discard.length;
+    const visible = Math.min(VISIBLE_DISCARD, discard.length);
+
+    if (grew > 0 && grew < visible) {
+      for (const card of discard.slice(-grew)) {
+        this.state.discard.push(CardState.from(card));
+      }
+      while (this.state.discard.length > visible) this.state.discard.shift();
+      return;
+    }
+
+    this.state.discard.splice(0);
+    for (const card of discard.slice(-visible)) {
+      this.state.discard.push(CardState.from(card));
+    }
+  }
+
+  /**
+   * O log, pelo mesmo motivo e do mesmo jeito: ele é uma janela que anda, e
+   * anunciar uma linha nova reescrevendo as doze mandava doze operações no
+   * patch para dizer uma. `logSeq` é o que diz quantas são novas — sem ele não
+   * dava para saber, porque duas linhas podem ter o mesmo texto.
+   *
+   * Uma partida nova zera o contador, e aí a janela inteira é outra.
+   */
+  private syncLog() {
+    const { log, logSeq } = this.game;
+    const fresh = logSeq - this.sentLogSeq;
+    this.sentLogSeq = logSeq;
+
+    // Pelo mesmo cuidado do descarte: o contador zerado de uma partida nova
+    // pode cair exatamente onde o da anterior parou.
+    const mirrored = this.state.log;
+    if (fresh === 0 && mirrored.length === log.length && mirrored.at(-1) === log.at(-1)) {
+      return;
+    }
+    if (fresh > 0 && fresh < log.length) {
+      const dropped = mirrored.length + fresh - log.length;
+      for (let i = 0; i < dropped; i++) mirrored.shift();
+      for (const message of log.slice(-fresh)) mirrored.push(message);
+      return;
+    }
+
+    mirrored.splice(0);
+    mirrored.push(...log);
+  }
+
   private syncPlayers() {
     const rosterChanged =
       this.state.players.length !== this.game.players.length ||
@@ -423,28 +491,48 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
     for (const client of this.clients) this.sendHandTo(client);
   }
 
-  /** A metade privada da mesa, para um cliente só. Quem não joga não tem mão. */
-  private sendHandTo(client: Client) {
+  /**
+   * A metade privada da mesa, para um cliente só. Quem não joga não tem mão.
+   *
+   * E só quando ela mudou. Toda ação da mesa passa por `sync`, e `sync` mandava
+   * a mão inteira para TODO mundo: uma jogada de um deles reescrevia o leque
+   * dos dez, com as cartas uma a uma na rede e um redesenho da mesa inteira do
+   * outro lado — para dizer que nada nele mudou. Os ids bastam para saber:
+   * carta é identidade, e duas mãos com os mesmos ids são a mesma mão.
+   *
+   * `force` é para quem não tem passado com que comparar — quem acabou de
+   * chegar, ou quem pediu a mesa de novo depois de o socket sumir.
+   */
+  private sendHandTo(client: Client, force = false) {
     const player = this.game.players.find((p) => p.id === client.sessionId);
     if (!player) return;
-    client.send("hand", {
-      cards: player.hand,
-      playableIds: this.game.playableCards(player.id).map((c) => c.id),
-    } satisfies HandMessage);
+
+    const playableIds = this.game.playableCards(player.id).map((c) => c.id);
+    const signature = `${player.hand.map((c) => c.id).join()}|${playableIds.join()}`;
+    if (!force && this.sentHands.get(client.sessionId) === signature) return;
+    this.sentHands.set(client.sessionId, signature);
+
+    client.send("hand", { cards: player.hand, playableIds } satisfies HandMessage);
   }
 
-  /** Short, shareable room codes instead of the default random ids. */
+  /**
+   * Short, shareable room codes instead of the default random ids.
+   *
+   * Pergunta por UM código de cada vez em vez de baixar a lista de todas as
+   * salas abertas: a conferência é a mesma, e o que se deixa de trazer pela
+   * rede é o servidor inteiro — a cada mesa criada, e justo quando ele está
+   * cheio, que é quando a lista é maior.
+   */
   private async generateRoomId(): Promise<string> {
-    const taken = await this.presence.smembers(LOBBY_CHANNEL);
-    let id = "";
-    do {
-      id = Array.from(
+    for (;;) {
+      const id = Array.from(
         { length: ROOM_CODE_LENGTH },
         () => ROOM_CODE_ALPHABET[Math.floor(Math.random() * ROOM_CODE_ALPHABET.length)],
       ).join("");
-    } while (taken.includes(id));
-    await this.presence.sadd(LOBBY_CHANNEL, id);
-    return id;
+      if (await this.presence.sismember(LOBBY_CHANNEL, id)) continue;
+      await this.presence.sadd(LOBBY_CHANNEL, id);
+      return id;
+    }
   }
 }
 

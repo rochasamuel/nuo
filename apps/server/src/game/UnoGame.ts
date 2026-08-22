@@ -72,6 +72,13 @@ export class UnoGame {
   winnerId = "";
   log: string[] = [];
   /**
+   * Quantas linhas o log já escreveu nesta partida, incluindo as que a janela
+   * de doze já descartou. É por este número que a sala sabe quantas linhas são
+   * novas — e mandar só as novas é a diferença entre um patch de uma operação
+   * e um da lista inteira, a cada jogada e para a mesa toda.
+   */
+  logSeq = 0;
+  /**
    * O que aconteceu desde a última leitura, para a mesa animar. Fila, e não
    * estado: quem lê, esvazia. O `log` conta a mesma história em português; esta
    * conta em coordenadas — de onde a carta sai e para onde vai.
@@ -196,6 +203,7 @@ export class UnoGame {
     this.winnerId = "";
     this.phase = "playing";
     this.log = [];
+    this.logSeq = 0;
     this.fx = [];
 
     for (const player of this.players) {
@@ -767,6 +775,7 @@ export class UnoGame {
 
   private pushLog(message: string) {
     this.log.push(message);
+    this.logSeq++;
     if (this.log.length > LOG_SIZE) this.log.splice(0, this.log.length - LOG_SIZE);
   }
 }
