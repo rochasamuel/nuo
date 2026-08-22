@@ -1056,6 +1056,79 @@ describe("victory", () => {
     expect(game.winnerId).toBe("p0");
     expect(() => game.drawCard("p1")).toThrow(/não está em andamento/);
   });
+
+  /*
+   * A última carta ganha a partida, e o efeito dela não acontece.
+   *
+   * Esvaziar a mão é o fim, e o fim vem antes de tudo: o `playCard` devolve no
+   * instante em que a mão zera, antes do tapa, da troca e da roda. Vale como
+   * regra da casa — "quem bate, bateu" — e é também a saída mais segura das
+   * duas.
+   *
+   * A outra seria deixar o efeito acontecer primeiro, e ela abre um buraco: um
+   * 7 baixado como última carta numa mesa de dois passaria a mão VAZIA para o
+   * adversário, e nada no jogo procura uma mão vazia fora do `playCard`. A
+   * partida seguiria com alguém sem cartas e sem ninguém para declarar
+   * vencedor. Estes testes existem para que a ordem não se inverta sem querer.
+   */
+  it("wins on the last card without firing its rule", () => {
+    const cases = [
+      { rule: "zeroRotate", value: 0, id: "z" },
+      { rule: "sevenSwap", value: 7, id: "s" },
+      { rule: "slapNine", value: 9, id: "n" },
+    ] as const;
+
+    for (const { rule, value, id } of cases) {
+      const game = newGame(3);
+      game.rules[rule] = true;
+      setHand(game, 0, [card(id, "red", "number", value)]);
+      setHand(game, 1, [card("a", "blue", "number", 1)]);
+      setHand(game, 2, [card("b", "blue", "number", 2)]);
+      game.playCard("p0", id);
+
+      expect(game.phase).toBe("finished");
+      expect(game.winnerId).toBe("p0");
+      // Nada ficou pendurado: a mesa acabada não pede tapa nem escolha, e as
+      // mãos dos outros continuam onde estavam.
+      expect(game.slapPending).toEqual([]);
+      expect(game.swapChooserId).toBe("");
+      expect(game.players.map((p) => p.hand.length)).toEqual([0, 1, 1]);
+    }
+  });
+
+  /*
+   * O 7 numa mesa de dois troca sozinho, sem perguntar. Como última carta ele
+   * daria ao adversário uma mão vazia — o buraco descrito acima. Aqui se cobra
+   * que a vitória venha primeiro justamente nessa mesa.
+   */
+  it("wins on a last seven at a table of two, instead of swapping an empty hand", () => {
+    const game = newGame(2);
+    game.rules.sevenSwap = true;
+    setHand(game, 0, [card("s", "red", "number", 7)]);
+    setHand(game, 1, [card("a", "blue", "number", 1), card("b", "blue", "number", 2)]);
+    game.playCard("p0", "s");
+
+    expect(game.phase).toBe("finished");
+    expect(game.winnerId).toBe("p0");
+    expect(game.players[1].hand.map((c) => c.id)).toEqual(["a", "b"]);
+  });
+
+  /*
+   * A penúltima, por outro lado, é uma jogada comum: o efeito acontece. Sem
+   * este par o teste acima passaria com um `playCard` que nunca aplicasse
+   * efeito nenhum.
+   */
+  it("still swaps when the seven is not the last card", () => {
+    const game = newGame(2);
+    game.rules.sevenSwap = true;
+    setHand(game, 0, [card("s", "red", "number", 7), card("x", "blue", "number", 3)]);
+    setHand(game, 1, [card("a", "blue", "number", 1)]);
+    game.playCard("p0", "s");
+
+    expect(game.phase).toBe("playing");
+    expect(game.players[0].hand.map((c) => c.id)).toEqual(["a"]);
+    expect(game.players[1].hand.map((c) => c.id)).toEqual(["x"]);
+  });
 });
 
 describe("two players", () => {
