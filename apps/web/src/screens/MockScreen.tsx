@@ -14,6 +14,7 @@ import { FlightLayer } from "../components/FlightLayer";
 import { StarterRoulette } from "../components/StarterRoulette";
 import { Table } from "../components/Table";
 import { flyDeal, flyDraw, flyRotate, flySwap } from "../game/flights";
+import { useMediaQuery } from "../lib/useMediaQuery";
 import type { RoomActions } from "../game/useRoomConnection";
 
 /**
@@ -54,6 +55,15 @@ const toPublic = (card: Card): PublicCard => ({
 });
 
 export function MockScreen() {
+  /*
+   * Aberta onde ela cabe ao lado da mesa, fechada onde ela cobriria a mesa —
+   * mas só até alguém decidir. `null` é "ainda não decidiram", e é o que deixa
+   * o padrão seguir a largura da janela sem passar por cima de uma escolha.
+   */
+  const wideEnough = useMediaQuery("(min-width: 640px)");
+  const [panelOpen, setPanelOpen] = useState<boolean | null>(null);
+  const showPanel = panelOpen ?? wideEnough;
+
   const [handSize, setHandSize] = useState(25);
   const [playerCount, setPlayerCount] = useState(10);
   const [wildOnTop, setWildOnTop] = useState(true);
@@ -271,9 +281,24 @@ export function MockScreen() {
         altura presa à janela e a rolagem própria. `top-16` mais a folga de
         baixo são as 5rem que saem do cálculo. `overscroll-contain` para que
         chegar ao fim da lista não puxe a página atrás — que é a mesa.
+
+        E ela se recolhe: num celular a barra cobre a mesa inteira, que é
+        justamente o que se veio olhar. O botão fica no canto em que ela abre,
+        e continua na tela quando ela sai — senão não haveria como trazê-la de
+        volta.
       */}
-      <div className="px-slab uno-mock-panel fixed top-16 right-4 z-30 flex max-h-[calc(100dvh-5rem)] w-56 flex-col gap-3 overflow-y-auto overscroll-contain p-3">
-        <p className="px-label">Mock</p>
+      <div className="fixed top-16 right-4 z-30 flex max-h-[calc(100dvh-5rem)] w-56 max-w-[calc(100vw-2rem)] flex-col items-end gap-2">
+        <button
+          type="button"
+          className="px-btn shrink-0"
+          onClick={() => setPanelOpen(!showPanel)}
+          aria-expanded={showPanel}
+        >
+          {showPanel ? "esconder ▸" : "▤ mock"}
+        </button>
+
+        {showPanel && (
+        <div className="px-slab uno-mock-panel flex w-full min-h-0 flex-col gap-3 overflow-y-auto overscroll-contain p-3">
 
         <Slider label="Cartas na mão" value={handSize} min={1} max={30} onChange={dealHand} />
         <Slider label="Jogadores" value={playerCount} min={2} max={10} onChange={setPlayerCount} />
@@ -358,6 +383,8 @@ export function MockScreen() {
           define quantas cartas voam de uma vez. Com o empilhamento ligado, cada
           +2/+4 jogado soma à pilha e o contador da lateral acompanha.
         </p>
+        </div>
+        )}
       </div>
 
       {draft && (

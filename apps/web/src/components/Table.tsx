@@ -166,32 +166,56 @@ export function Table({
   };
 
   return (
-    <div className="uno-table flex min-h-dvh flex-col gap-3 p-4">
-      {/* `relative` pelo painel do RulesMenu, que pende desta barra e não do
-          próprio botão — ver .uno-rules-panel em index.css. */}
-      <header className="px-slab relative flex flex-wrap items-center justify-between gap-3 px-4 py-2">
-        <span className="flex items-baseline gap-2">
-          <span className="px-label">{state.roomName}</span>
-          <span className="text-sm" style={{ color: "var(--paper-hi)" }}>
-            vez de <b style={{ color: "var(--mark)" }}>{current?.name ?? "—"}</b>
+    <div className="uno-table flex min-h-dvh flex-col gap-2 p-2 sm:gap-3 sm:p-4">
+      {/*
+        `relative` pelo painel do RulesMenu, que pende desta barra e não do
+        próprio botão — ver .uno-rules-panel em index.css.
+
+        No celular ela é uma TIRA de uma linha, e não um cabeçalho com uma
+        fileira de botões embaixo: as duas fileiras custavam quase um terço da
+        altura da tela para dizer de quem era a vez. O que sai são as PALAVRAS
+        que o desenho ao lado já diz — o quadrado azul é "azul", a seta é o
+        sentido —, e elas continuam lá para quem lê a tela com os ouvidos. O
+        que não sai é nenhuma informação.
+      */}
+      <header className="uno-header px-slab relative flex items-center justify-between gap-3 px-3 py-1 sm:flex-wrap sm:px-4 sm:py-2">
+        <span className="flex min-w-0 items-baseline gap-2">
+          {/* Encolhe até sumir antes de cortar o nome de quem joga: o nome da
+              mesa é o que se sabe de cor, e a vez é o que se está esperando. */}
+          <span className="px-label min-w-0 truncate">{state.roomName}</span>
+          <span className="shrink-0 text-sm" style={{ color: "var(--paper-hi)" }}>
+            {/* O mesmo ▶ que marca o assento da vez lá embaixo. Na tira ele faz
+                o trabalho do "vez de", que não caberia. */}
+            <span aria-hidden className="sm:hidden" style={{ color: "var(--mark)" }}>
+              ▶{" "}
+            </span>
+            <span className="sr-only sm:not-sr-only">vez de </span>
+            <b style={{ color: "var(--mark)" }}>{current?.name ?? "—"}</b>
           </span>
         </span>
 
-        <span className="flex items-center gap-4">
+        <span className="flex shrink-0 items-center gap-3 sm:gap-4">
           {state.currentColor && (
             <span className="flex items-center gap-2">
               <span
-                className="inline-block size-4"
+                className="inline-block size-4 shrink-0"
                 style={{
                   background: COLOR_HEX[state.currentColor],
                   border: "2px solid var(--rim)",
                 }}
               />
-              <span className="px-label">{COLOR_NAME[state.currentColor]}</span>
+              <span className="px-label sr-only sm:not-sr-only">
+                {COLOR_NAME[state.currentColor]}
+              </span>
             </span>
           )}
-          <span className="px-label" title="direção">
-            {state.direction === 1 ? "↻ horário" : "↺ anti-horário"}
+          <span className="px-label flex items-center gap-1" title="direção">
+            <span aria-hidden className="uno-header-turn">
+              {state.direction === 1 ? "↻" : "↺"}
+            </span>
+            <span className="sr-only sm:not-sr-only">
+              {state.direction === 1 ? "horário" : "anti-horário"}
+            </span>
           </span>
           <RulesMenu rules={state.rules} />
           <ConfigMenu wide={wide} />

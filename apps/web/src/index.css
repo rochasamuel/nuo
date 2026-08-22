@@ -751,6 +751,48 @@ body {
   color: var(--mark);
 }
 
+/* ---- a tira de estado da mesa -------------------------------------------- */
+
+/*
+ * No celular o cabeçalho é uma linha só, e nela os controles são glifos de
+ * doze pixels. O dedo não tem doze pixels — mas engordar os botões devolveria
+ * à barra a altura que ela acabou de perder. Então o alvo cresce por fora, num
+ * pseudo-elemento que se sobrepõe à tira sem ocupar lugar nela: o desenho
+ * continua do tamanho que é e a área de toque fica com 32px de altura.
+ *
+ * `pointer: coarse` e não uma largura: quem decide não é o tamanho da tela, é
+ * com o que se está apontando.
+ */
+/*
+ * A seta do sentido, sozinha na tira.
+ *
+ * De `sm` para cima ela é uma nota de rodapé: as setas entre os assentos já
+ * contam a mesma coisa, e com desenho. No celular aquelas não nascem, e esta
+ * vira a ÚNICA coisa na tela que diz para que lado a vez corre — apagada e com
+ * dez pixels ela passava batido. Aqui ela cresce e clareia até a mesma
+ * presença do quadrado da cor, que é o outro estado da mesa nesta tira.
+ */
+@media (width < 40rem) {
+  .uno-header-turn {
+    font-size: 16px;
+    letter-spacing: 0;
+    color: var(--paper-sh);
+  }
+}
+
+@media (pointer: coarse) {
+  .uno-header .px-link {
+    position: relative;
+  }
+  .uno-header .px-link::after {
+    content: "";
+    position: absolute;
+    /* A folga lateral é metade do gap da tira, para dois alvos vizinhos
+       chegarem perto sem se sobrepor. */
+    inset: -8px -4px;
+  }
+}
+
 /*
  * O painel pende do CABEÇALHO, e não do resumo: numa tela estreita a barra
  * quebra em duas linhas e o resumo para no meio dela — preso a ele, o painel

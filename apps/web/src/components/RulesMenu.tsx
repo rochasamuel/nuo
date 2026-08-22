@@ -28,8 +28,14 @@ export function RulesMenu({ rules }: Props) {
     <details className="uno-rules" name="uno-header">
       <summary className="px-link" aria-label="Regras da casa">
         {/* A conta no rótulo é o que se quer saber de relance: se a mesa tem
-            alguma variação de pé. Abrir é para descobrir quais. */}
-        ⚙ regras · {on}/{RULES.length}
+            alguma variação de pé. Abrir é para descobrir quais.
+
+            No celular fica só ela, ao lado da engrenagem: numa tira de uma
+            linha a palavra "regras" custa o lugar do nome da mesa, e a conta é
+            justamente a parte que não dá para adivinhar do desenho. O nome
+            inteiro continua no `aria-label`. */}
+        ⚙ <span className="hidden sm:inline">regras · </span>
+        {on}/{RULES.length}
       </summary>
 
       <div className="px-slab uno-rules-panel flex flex-col gap-3 p-4">

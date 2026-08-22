@@ -29,8 +29,10 @@ export function ConfigMenu({ wide }: Props) {
 
   return (
     <details className="uno-rules" name="uno-header">
+      {/* Pelo mesmo motivo do vizinho, a palavra sai no celular e fica o
+          glifo. Quem lê a tela com os ouvidos ouve o `aria-label`. */}
       <summary className="px-link" aria-label="Ajustes da tela">
-        ▤ ajustes
+        ▤<span className="hidden sm:inline"> ajustes</span>
       </summary>
 
       <div className="px-slab uno-rules-panel flex flex-col gap-3 p-4">
