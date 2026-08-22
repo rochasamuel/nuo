@@ -104,9 +104,23 @@ export function Table({
    * assentos virados em alvo, e a de quem assiste, que só precisa saber por
    * quem a mesa parou.
    */
-  const swapping = state.swapChooserId !== "";
-  const iSwap = state.swapChooserId === sessionId;
-  const chooser = state.players.find((player) => player.id === state.swapChooserId);
+  /*
+   * Quem escolhe — ou ninguém, que é o normal. Lido do combinado para fora, e
+   * não do campo para dentro: sem o 7 combinado a mesa nunca para para
+   * escolher, então qualquer nome que chegue aqui é lixo.
+   *
+   * O `?? ""` é o mesmo cuidado uma camada abaixo. `state.swapChooserId !== ""`
+   * dava `true` para um campo AUSENTE, e ausente é o que ele fica quando o
+   * servidor do outro lado é de uma versão que não conhece este campo: o
+   * cliente lia "não sei" como "a mesa parou" e pendurava o aviso da troca numa
+   * mesa em que ninguém escolhia nada — sem assento em alvo, sem prazo para
+   * vencer, sem nada que o tirasse da tela. Uma dúvida nunca pode congelar a
+   * mesa; na dúvida, o jogo segue.
+   */
+  const chooserId = state.rules.sevenSwap ? (state.swapChooserId ?? "") : "";
+  const swapping = chooserId !== "";
+  const iSwap = chooserId === sessionId;
+  const chooser = state.players.find((player) => player.id === chooserId);
 
   // A mesa congelada pelo tapa: ninguém joga, todo mundo bate. `mine` é se você
   // ainda deve o seu — quem já bateu só assiste os outros correrem.
@@ -256,7 +270,7 @@ export function Table({
                   // e qualquer outro serve. Não há alvo errado para desabilitar.
                   pickable={iSwap}
                   onPick={() => actions.swap(player.id)}
-                  choosing={player.id === state.swapChooserId}
+                  choosing={player.id === chooserId}
                   bubble={bubbles[player.id]}
                 />
               </span>
