@@ -246,6 +246,43 @@ body {
   color: var(--gloss);
 }
 
+/* ---- interruptor de regra: a peça da tela de abertura --------------------
+ * O estado à esquerda, o nome e a explicação à direita, e a linha inteira é o
+ * alvo do clique — um `checkbox` de 16px é alvo de mouse, não de polegar, e a
+ * explicação ao lado dele ficava parecendo legenda em vez de parte do botão.
+ * ------------------------------------------------------------------------- */
+
+.uno-rule {
+  padding: 8px;
+  background: var(--slab-sh);
+  border: var(--stroke) solid var(--rim);
+  /* Relevo invertido, como o do campo de texto: é uma peça que se AFUNDA, e
+     não uma que se aperta. */
+  box-shadow:
+    inset 2px 2px 0 var(--rim),
+    inset -2px -2px 0 var(--slab-hi);
+  cursor: pointer;
+}
+.uno-rule:hover {
+  background: var(--slab);
+}
+.uno-rule-box {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+  color: var(--ink);
+  background: var(--paper);
+  border: var(--stroke) solid var(--rim);
+}
+.uno-rule[aria-checked="true"] .uno-rule-box {
+  background: var(--mark);
+}
+
 /* ---- código da sala: o dado mais importante da tela de espera ------------ */
 
 .px-code {

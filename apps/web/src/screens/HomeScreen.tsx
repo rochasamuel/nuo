@@ -101,28 +101,16 @@ export function HomeScreen() {
 
         {/* O que se combina antes de repartir. Vale para a mesa inteira e não
             muda depois, então é aqui — e não no lobby — que se decide. */}
-        <fieldset className="flex flex-col gap-2">
-          <legend className="px-label mb-2">Regras da casa</legend>
+        <fieldset className="flex flex-col gap-2 border-0 p-0">
+          <legend className="px-label pb-1">Regras da casa</legend>
           {RULES.map(({ key, label, hint }) => (
-            <label key={key} className="flex cursor-pointer items-start gap-2">
-              <input
-                type="checkbox"
-                checked={rules[key]}
-                onChange={(event) =>
-                  setRules((current) => ({ ...current, [key]: event.target.checked }))
-                }
-                className="mt-1 size-4 shrink-0"
-                style={{ accentColor: "var(--mark)" }}
-              />
-              <span className="flex flex-col">
-                <span className="text-sm" style={{ color: "var(--paper-hi)" }}>
-                  {label}
-                </span>
-                <span className="text-xs" style={{ color: "var(--paper-sh)" }}>
-                  {hint}
-                </span>
-              </span>
-            </label>
+            <HouseRule
+              key={key}
+              label={label}
+              hint={hint}
+              on={rules[key]}
+              onToggle={() => setRules((current) => ({ ...current, [key]: !current[key] }))}
+            />
           ))}
         </fieldset>
 
@@ -181,5 +169,49 @@ export function HomeScreen() {
         </a>
       </footer>
     </main>
+  );
+}
+
+/**
+ * Um interruptor de regra: o estado à esquerda, o nome e a explicação à
+ * direita, e a linha inteira é o botão. A explicação não é opcional — "Tapa no
+ * 9" não diz nada a quem nunca jogou, e uma regra que muda o que a carta faz
+ * não pode entrar na mesa por um nome que ninguém entendeu.
+ *
+ * `role="switch"` e não um `checkbox`: o que se vê é uma peça da mesa, com o
+ * mesmo relevo das outras, e o quadradinho é desenho nosso. Quem lê a tela com
+ * os ouvidos continua ouvindo "interruptor, ligado" pelo `aria-checked`.
+ */
+function HouseRule({
+  label,
+  hint,
+  on,
+  onToggle,
+}: {
+  label: string;
+  hint: string;
+  on: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      onClick={onToggle}
+      className="uno-rule flex items-start gap-3 text-left"
+    >
+      <span className="uno-rule-box" aria-hidden>
+        {on ? "✕" : ""}
+      </span>
+      <span className="flex flex-col gap-0.5">
+        <span className="text-sm" style={{ color: on ? "var(--mark)" : "var(--paper)" }}>
+          {label}
+        </span>
+        <span className="px-label" style={{ letterSpacing: "0.06em", textTransform: "none" }}>
+          {hint}
+        </span>
+      </span>
+    </button>
   );
 }

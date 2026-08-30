@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { BACK_URL } from "../lib/cards";
+import { playSound, VOLUME } from "../lib/sound";
 import { isLowMotion } from "../store/ui";
 
 /**
@@ -21,6 +22,20 @@ import { isLowMotion } from "../store/ui";
 const STAGGER = 70;
 /** No reparto inicial, uma de cada vez, jogador a jogador — como se distribui. */
 const DEAL_STAGGER = 55;
+/**
+ * O teto de batidas do reparto. Uma por carta SUA enquanto elas couberem aqui.
+ *
+ * Passando disto a batida rareia — uma a cada N cartas, espalhada pelo reparto
+ * inteiro. O que a orelha reconhece num reparto é o RITMO, e não a contagem, e
+ * uma dúzia de toques seguidos já é baralho demais.
+ */
+const DEAL_BEATS = 12;
+/**
+ * O reparto soa mais baixo que uma carta baixada, e de propósito: são vários
+ * toques seguidos contra um, e no mesmo volume eles mandariam na mesa. É pano
+ * de fundo — o baralho na mão de quem reparte, e não uma carta batendo na mesa.
+ */
+const DEAL_VOLUME = VOLUME * 0.55;
 /** Quantos versos representam o descarte inteiro voltando a ser baralho. */
 const RECYCLE_CARDS = 3;
 /**
@@ -378,11 +393,44 @@ export function flyDraw(options: {
 }
 
 /**
+ * O baralho sendo repartido: a mesma batida da carta baixada, repetida. Uma só
+ * no começo não diria nada — o que faz a orelha reconhecer um reparto é a
+ * REPETIÇÃO.
+ *
+ * Uma batida por carta SUA, e não por carta da mesa: as setenta cartas de uma
+ * mesa de dez virariam uma metralhadora, e o que interessa a quem ouve é o
+ * próprio bolo chegando, que é o que ele vai ter na mão.
+ *
+ * Os relógios são os mesmos dos voos, então `clearFlights` cancela o que ainda
+ * não soou: uma revanche não carrega o reparto da partida anterior.
+ */
+function dealBeat(cards: number) {
+  const beats = Math.min(cards, DEAL_BEATS);
+  // De quantas em quantas cartas sai um toque, para o reparto durar o mesmo
+  // com sete cartas na mão e com trinta.
+  const every = beats > 0 ? cards / beats : 0;
+  for (let i = 0; i < beats; i++) {
+    const timer = setTimeout(
+      () => {
+        timers.delete(timer);
+        playSound("play", DEAL_VOLUME);
+      },
+      Math.round(i * every) * DEAL_STAGGER,
+    );
+    timers.add(timer);
+  }
+}
+
+/**
  * O reparto inicial. Os eventos chegam agrupados por jogador, mas ninguém
  * distribui sete cartas para um e depois sete para o outro: o atraso de cada
  * carta é calculado em rodadas, uma volta na mesa por vez.
  */
 export function flyDeal(hands: { seat: string | null; count: number }[]) {
+  // O som antes do `reduced`: quem desligou o movimento não desligou o som, e
+  // sem os voos ele é a única coisa que diz que a mesa está repartindo.
+  // `seat: null` é você — ver `flyDraw`.
+  dealBeat(hands.find((entry) => entry.seat === null)?.count ?? 0);
   if (reduced()) return;
   for (const [index, entry] of hands.entries()) {
     for (let round = 0; round < entry.count; round++) {
