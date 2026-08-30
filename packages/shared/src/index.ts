@@ -301,15 +301,29 @@ export const toCard = (card: PublicCard): Card => ({
 });
 
 
+/**
+ * A chave da cadeira: quem você é para esta mesa.
+ *
+ * O Colyseus já tem um token de reconexão, e ele não basta — o servidor o TROCA
+ * a cada reconexão, e a aba que morre entre a troca e a gravação no
+ * localStorage fica com uma chave morta na mão, trancada do lado de fora da
+ * própria cadeira. Esta aqui nasce no navegador, não muda nunca e vale
+ * enquanto a cadeira estiver guardada.
+ *
+ * É uma credencial ao portador, como o token: quem a tem senta na cadeira dela.
+ * Por isso é sorteada, nunca derivada do nome, e nunca aparece na tela.
+ */
 export type CreateRoomOptions = {
   roomName: string;
   playerName: string;
   maxPlayers: number;
+  seatKey: string;
   rules: HouseRules;
 };
 
 export type JoinRoomOptions = {
   playerName: string;
+  seatKey: string;
 };
 
 /** client -> server */

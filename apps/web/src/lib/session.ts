@@ -16,6 +16,13 @@ import {
 export type StoredSession = {
   reconnectionToken: string;
   playerName: string;
+  /**
+   * A chave da cadeira nesta mesa. Ao contrário do `reconnectionToken`, que o
+   * servidor troca a cada reconexão, esta não muda nunca — é ela que devolve o
+   * lugar a quem voltou com o token velho na mão. Ver `seatKey` no
+   * `@uno/shared`.
+   */
+  seatKey: string;
 };
 
 /**
@@ -28,6 +35,25 @@ export type StoredSetup = {
   maxPlayers: number;
   rules: HouseRules;
 };
+
+/**
+ * A chave desta mesa: a que já existe, ou uma nova.
+ *
+ * Sorteada, e nunca derivada do nome: é uma credencial ao portador, e um nome
+ * seria adivinhável — bastaria digitar "Ana" para sentar na cadeira da Ana
+ * enquanto ela estivesse caída.
+ */
+export function seatKeyFor(code: string): string {
+  const saved = loadSession(code)?.seatKey;
+  return saved || newSeatKey();
+}
+
+export const newSeatKey = () =>
+  typeof crypto?.randomUUID === "function"
+    ? crypto.randomUUID()
+    : // Navegador sem `randomUUID` (http em rede local, por exemplo): duas
+      // rodadas de base 36 dão entropia de sobra para uma mesa de dez pessoas.
+      `${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`;
 
 const sessionKey = (code: string) => `uno:session:${code}`;
 const NAME_KEY = "uno:name";

@@ -1,4 +1,4 @@
-import { Room, type Client, type CloseCode } from "colyseus";
+import { CloseCode, Room, type Client } from "colyseus";
 import {
   DEFAULT_MAX_PLAYERS,
   EMOTE_COOLDOWN,
@@ -24,7 +24,7 @@ import {
   type SwapMessage,
 } from "@uno/shared";
 import type { ArraySchema } from "@colyseus/schema";
-import { GameError, UnoGame } from "../game/UnoGame.js";
+import { GameError, UnoGame, type GamePlayer } from "../game/UnoGame.js";
 import { CardState, PlayerState, UnoRoomState } from "./UnoState.js";
 
 /** Cards of the discard pile the clients keep, so the table can render a messy stack. */
@@ -33,6 +33,9 @@ const VISIBLE_DISCARD = 8;
 const ROOM_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 const ROOM_CODE_LENGTH = 5;
 const LOBBY_CHANNEL = "$unolobby";
+
+/** O único fechamento que é uma saída de verdade: alguém apertou "sair". */
+const CONSENTED = CloseCode.CONSENTED;
 
 export class UnoRoom extends Room<{ state: UnoRoomState }> {
   state = new UnoRoomState();
@@ -53,6 +56,12 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
   private sentHands = new Map<string, string>();
   /** Até que linha do log a mesa já foi espelhada. Ver `syncLog`. */
   private sentLogSeq = 0;
+  /**
+   * Cadeiras guardadas agora, à espera de quem caiu. Existe para não guardar a
+   * mesma cadeira duas vezes: o framework avisa a mesma queda por dois caminhos
+   * (ver `onLeave`), e a segunda reserva seria um lugar que nunca morre.
+   */
+  private holding = new Set<string>();
 
   messages = {
     start: (client: Client) => this.act(client, () => this.draft(client)),
@@ -145,44 +154,112 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
     }
   }
 
+  /**
+   * A porta da sala. É AQUI que se decide quem entra, e não numa tranca no
+   * matchmaking — uma sala trancada recusa antes de olhar quem está batendo, e
+   * quem estava batendo era justamente quem tinha uma cadeira guardada lá
+   * dentro. Ver `onDrop`.
+   */
   onJoin(client: Client, options: JoinRoomOptions) {
-    this.game.addPlayer(client.sessionId, sanitize(options?.playerName, "Jogador", 16));
-    this.connected.add(client.sessionId);
+    const seatKey = sanitize(options?.seatKey, "", 64);
+    const seat = this.game.seatOf(seatKey);
+
+    if (seat) {
+      /*
+       * Uma cadeira só se reclama vazia. Com o dono conectado, a chave não abre
+       * nada: ela é uma credencial ao portador, e sem esta guarda uma cópia
+       * dela derrubaria o dono da própria mesa.
+       */
+      if (this.connected.has(seat.id)) {
+        throw new GameError("Você já está nesta mesa em outra aba.");
+      }
+      this.reseat(seat, client);
+    } else {
+      // O sorteio já rolando é uma partida que começou: quem entrasse agora
+      // receberia cartas de uma roleta que já passou na tela dos outros.
+      if (this.starterTimer) throw new GameError("A partida já começou.");
+      this.game.addPlayer(client.sessionId, seatKey, sanitize(options?.playerName, "Jogador", 16));
+      this.connected.add(client.sessionId);
+    }
+
     if (!this.state.hostId) this.state.hostId = client.sessionId;
     this.sync();
   }
 
+  /**
+   * Devolve a cadeira a quem voltou por uma conexão nova.
+   *
+   * A sessão é outra, e o assento é o mesmo: a mão, o lugar na roda e a vez
+   * continuam onde estavam. O que troca de dono é o `sessionId`, que é como a
+   * mesa endereça as pessoas — daí ter de acompanhá-lo em toda parte que o
+   * guarda.
+   */
+  private reseat(seat: GamePlayer, client: Client) {
+    const previous = seat.id;
+    this.game.reseat(seat, client.sessionId);
+    // A reserva antiga ainda vai vencer lá na frente, e quando vencer não vai
+    // achar cadeira nenhuma com aquele id — que é o certo. O que sai daqui é só
+    // a marca, para ela não sobrar em memória pelo resto da partida.
+    this.holding.delete(previous);
+    this.connected.delete(previous);
+    this.connected.add(client.sessionId);
+    this.sentHands.delete(previous);
+    this.lastEmote.delete(previous);
+    if (this.state.hostId === previous) this.state.hostId = client.sessionId;
+    if (this.state.starterId === previous) this.state.starterId = client.sessionId;
+  }
+
+  /**
+   * A queda. A cadeira fica guardada por 90 segundos, e só então morre.
+   *
+   * Duas coisas a guardam, e são duas de propósito: o `allowReconnection` do
+   * Colyseus, que devolve o lugar a quem voltar pelo token; e a `seatKey`, que
+   * devolve o mesmo lugar a quem voltar sem ele — o token TROCA a cada
+   * reconexão, e a aba que morre antes de guardar o novo volta com uma chave
+   * morta na mão. Ver `onJoin`.
+   */
   onDrop(client: Client) {
-    this.connected.delete(client.sessionId);
-    // Quem volta pode ser uma página nova, de leque vazio: o que ele já recebeu
-    // não vale mais como aposta.
-    this.sentHands.delete(client.sessionId);
-    this.sync();
-    // Guardar o lugar é também o que mantém a sala viva: o Colyseus só descarta
-    // uma sala sem clientes quando não há mais nenhuma reserva pendente.
-    this.allowReconnection(
-      client,
-      this.game.phase === "playing" ? RECONNECT_TIMEOUT : LOBBY_RECONNECT_TIMEOUT,
-    );
+    this.hold(client);
   }
 
   onReconnect(client: Client) {
+    /*
+     * A aba velha acordou depois de a nova já ter reclamado a cadeira pela
+     * chave. São duas conexões para uma pessoa só, e a cadeira é da nova: a
+     * velha não tem lugar nesta mesa, e mantê-la aqui seria uma tela viva
+     * mostrando uma mão que não é mais dela.
+     */
+    if (!this.seatOf(client)) {
+      client.send("error", {
+        message: "Você voltou para esta mesa em outra aba.",
+      } satisfies ErrorMessage);
+      client.leave();
+      return;
+    }
+    this.holding.delete(client.sessionId);
     this.connected.add(client.sessionId);
     this.sync();
   }
 
-  onLeave(client: Client, _code: CloseCode) {
-    this.connected.delete(client.sessionId);
-    this.lastEmote.delete(client.sessionId);
-    this.sentHands.delete(client.sessionId);
-    this.game.removePlayer(client.sessionId);
-    if (this.state.hostId === client.sessionId) {
-      this.state.hostId = this.game.players[0]?.id ?? "";
+  /**
+   * A saída — e nem toda saída é saída.
+   *
+   * O Colyseus não manda toda queda para o `onDrop`: quem cai LOGO DEPOIS de
+   * reconectar (o cliente ainda em `RECONNECTING`) e quem fecha a página
+   * chegam por aqui, no mesmo caminho de quem apertou "voltar ao início".
+   * Tratar os dois como saída era o que trancava o jogador do lado de fora:
+   * a pessoa minimizava o navegador, o socket morria duas vezes, e a cadeira
+   * que era para durar 90 segundos morria em três.
+   *
+   * Então a pergunta não é por onde a notícia chegou: é se ela foi CONSENTIDA.
+   * Só o `4000` é uma saída de verdade; o resto é queda, e queda guarda lugar.
+   */
+  onLeave(client: Client, code: CloseCode) {
+    if (code !== CONSENTED && !this.holding.has(client.sessionId) && this.seatOf(client)) {
+      this.hold(client);
+      return;
     }
-    // A sala continua fechada enquanto a roleta gira: quem entrasse no meio da
-    // volta receberia cartas de um sorteio que já passou na tela dele.
-    if (this.game.phase !== "playing" && !this.starterTimer) this.unlock();
-    this.sync();
+    this.release(client);
   }
 
   onDispose() {
@@ -190,6 +267,55 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
   }
 
   /* --------------------------------------------------------------- private */
+
+  /** A cadeira desta conexão, se ela ainda tiver uma. */
+  private seatOf(client: Client) {
+    return this.game.players.find((player) => player.id === client.sessionId);
+  }
+
+  /**
+   * Guarda o lugar de quem caiu, e marca o fim do prazo.
+   *
+   * O `catch` é o que faz os 90 segundos serem 90 segundos: sem ele, quem
+   * decidiria a hora de tirar a cadeira seria o `onLeave` que o framework
+   * dispara depois — o mesmo que não sabe distinguir uma queda de uma saída.
+   * Aqui a promessa é explícita: reconectou, fica; não reconectou, sai.
+   */
+  private hold(client: Client) {
+    // Um cliente que nem chegou a sentar (o `onJoin` o recusou) não tem cadeira
+    // a guardar, e pedir uma reserva para ele só rende um erro no log.
+    if (!this.seatOf(client)) return;
+
+    this.connected.delete(client.sessionId);
+    // Quem volta pode ser uma página nova, de leque vazio: o que ele já recebeu
+    // não vale mais como aposta.
+    this.sentHands.delete(client.sessionId);
+    this.holding.add(client.sessionId);
+    this.sync();
+
+    // Guardar o lugar é também o que mantém a sala viva: o Colyseus só descarta
+    // uma sala sem clientes quando não há mais nenhuma reserva pendente.
+    this.allowReconnection(
+      client,
+      this.game.phase === "playing" ? RECONNECT_TIMEOUT : LOBBY_RECONNECT_TIMEOUT,
+    ).catch(() => {
+      // O prazo venceu, ou a sala acabou: agora sim a cadeira é de mais ninguém.
+      this.release(client);
+    });
+  }
+
+  /** Tira a cadeira da mesa. Idempotente: o prazo e o framework podem chegar juntos. */
+  private release(client: Client) {
+    this.holding.delete(client.sessionId);
+    this.connected.delete(client.sessionId);
+    this.lastEmote.delete(client.sessionId);
+    this.sentHands.delete(client.sessionId);
+    this.game.removePlayer(client.sessionId);
+    if (this.state.hostId === client.sessionId) {
+      this.state.hostId = this.game.players[0]?.id ?? "";
+    }
+    this.sync();
+  }
 
   /** Runs a game action, reporting rejections to the caller instead of crashing the room. */
   private act(client: Client, action: () => void) {
@@ -278,7 +404,6 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
     this.requireHost(client);
     if (this.starterTimer) throw new GameError("O sorteio já está rolando.");
     this.state.starterId = this.game.draftStarter();
-    this.lock();
     this.starterTimer = this.clock.setTimeout(() => this.beginMatch(), STARTER_SPIN);
   }
 
@@ -291,8 +416,8 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
       this.game.start(starter);
     } catch {
       // A mesa desmanchou enquanto a roleta girava e não há mais partida a
-      // começar. O lobby reabre, e o host sorteia de novo quando houver gente.
-      this.unlock();
+      // começar. A porta reabre sozinha: quem a fechava era o `starterTimer`,
+      // e ele já foi embora.
     }
     this.sync();
   }

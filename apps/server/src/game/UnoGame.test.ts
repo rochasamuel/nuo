@@ -31,14 +31,14 @@ const card = (
 /** Uma mesa sentada e ainda no lobby, para quem testa o que acontece ao começar. */
 function newTable(random: () => number, playerCount = 3) {
   const game = new UnoGame(random);
-  for (let i = 0; i < playerCount; i++) game.addPlayer(`p${i}`, `P${i}`);
+  for (let i = 0; i < playerCount; i++) game.addPlayer(`p${i}`, `k${i}`, `P${i}`);
   return game;
 }
 
 /** A started game normalized to a neutral position: red 5 on top, first player to act. */
 function newGame(playerCount = 3) {
   const game = new UnoGame(seeded(7));
-  for (let i = 0; i < playerCount; i++) game.addPlayer(`p${i}`, `P${i}`);
+  for (let i = 0; i < playerCount; i++) game.addPlayer(`p${i}`, `k${i}`, `P${i}`);
   game.start();
   game.discard = [card("top", "red", "number", 5)];
   game.currentColor = "red";
@@ -61,7 +61,7 @@ const filler = () => card("filler", "blue", "number", 0);
 function timedGame(playerCount = 3) {
   let clock = 1_000_000;
   const game = new UnoGame(seeded(7), () => clock);
-  for (let i = 0; i < playerCount; i++) game.addPlayer(`p${i}`, `P${i}`);
+  for (let i = 0; i < playerCount; i++) game.addPlayer(`p${i}`, `k${i}`, `P${i}`);
   game.start();
   game.discard = [card("top", "red", "number", 5)];
   game.currentColor = "red";
@@ -133,8 +133,8 @@ describe("start", () => {
   it("deals seven cards to everyone and never opens on a wild", () => {
     for (let seed = 0; seed < 30; seed++) {
       const game = new UnoGame(seeded(seed));
-      game.addPlayer("a", "A");
-      game.addPlayer("b", "B");
+      game.addPlayer("a", "ka", "A");
+      game.addPlayer("b", "kb", "B");
       game.start();
       expect(game.players.every((p) => p.hand.length === 7)).toBe(true);
       expect(game.topCard!.color).not.toBe("wild");
@@ -144,7 +144,7 @@ describe("start", () => {
 
   it("refuses to start with a single player", () => {
     const game = new UnoGame(seeded(1));
-    game.addPlayer("a", "A");
+    game.addPlayer("a", "ka", "A");
     expect(() => game.start()).toThrow(GameError);
   });
 
@@ -1164,8 +1164,8 @@ describe("two players", () => {
 describe("fx events", () => {
   it("deals to every player and then flips the opening card", () => {
     const game = new UnoGame(seeded(7));
-    game.addPlayer("p0", "P0");
-    game.addPlayer("p1", "P1");
+    game.addPlayer("p0", "kp0", "P0");
+    game.addPlayer("p1", "kp1", "P1");
     game.start();
 
     expect(game.takeFx()).toEqual([

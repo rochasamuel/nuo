@@ -166,13 +166,38 @@ da demo.
 5. Clique numa carta para selecioná-la e clique de novo para jogar, ou arraste-a
    até o descarte. Os dois caminhos disparam a mesma ação.
 
-### Reconexão
+### Quem cai volta
 
-Ao entrar, o cliente guarda em `localStorage` apenas o `reconnectionToken` e o
-nome do jogador. Ao reabrir o link, ele chama `client.reconnect(token)` e volta
-para a mesma cadeira, com a mesma mão. O servidor segura o lugar por 60 segundos
-(`RECONNECT_TIMEOUT`). Passado esse tempo, ou se o token não valer mais, a tela
-explica que não foi possível voltar e oferece entrar de novo.
+A regra é uma frase: **a cadeira fica guardada por 90 segundos, e só então
+morre** (`RECONNECT_TIMEOUT`; no lobby são 5 minutos, `LOBBY_RECONNECT_TIMEOUT`,
+porque ali ninguém está esperando uma vez — o caso comum é o host sair do
+navegador para mandar o link no WhatsApp). Dentro do prazo, a mão, o lugar na
+roda e a vez continuam de pé.
+
+Cumprir essa frase exige duas coisas, e as duas são fáceis de errar:
+
+**1. Nem toda queda chega pelo `onDrop`.** O Colyseus manda para o `onLeave` —
+o mesmo caminho de quem apertou "voltar ao início" — quem cai logo depois de
+reconectar (o cliente ainda em `RECONNECTING`) e quem fecha a página. Tratar
+isso como saída matava a cadeira em segundos: a pessoa minimizava o navegador,
+o socket morria duas vezes, e a mesa já não a conhecia quando ela voltava. Hoje
+a pergunta não é por onde a notícia chegou, e sim se ela foi **consentida**: só
+o código `4000` é uma saída de verdade, o resto é queda, e queda guarda lugar.
+Quem tira a cadeira no fim é o `catch` do próprio `allowReconnection`, que é o
+único que sabe que o prazo venceu.
+
+**2. O token de reconexão não é uma chave estável.** O servidor o TROCA a cada
+reconexão, e a aba que morre entre a troca e a gravação no `localStorage` volta
+com uma chave morta na mão — a sala recusa, e não havia segunda porta. Por isso
+cada jogador carrega também uma **`seatKey`**: sorteada no navegador na primeira
+entrada, nunca muda, e é o que o `onJoin` reconhece para devolver a cadeira a
+quem voltou sem o token. A cadeira só se reclama vazia — com o dono conectado, a
+chave não abre nada.
+
+É por causa da `seatKey` que a sala **não é mais trancada** durante a partida:
+uma sala trancada recusa antes de olhar quem está batendo, e quem estava batendo
+era justamente quem tinha uma cadeira lá dentro. Quem decide quem entra é o
+`onJoin`, e ele recusa desconhecido com todas as letras.
 
 ## Regras implementadas
 

@@ -25,6 +25,21 @@ async function seated(count: number, rules: Record<string, boolean> = {}) {
   return { room, clients };
 }
 
+function engine(room: UnoRoom) {
+  const inner = room as unknown as { game: UnoGame; sync: () => void };
+  return { game: inner.game, sync: () => inner.sync() };
+}
+
+/** A partida começada na marra, sem os dois segundos e meio da roleta. */
+async function dealt(count: number) {
+  const seats = await seated(count);
+  const parts = engine(seats.room);
+  parts.game.start();
+  parts.sync();
+  await Promise.all(seats.clients.map((c) => c.waitForMessage("hand", 1000)));
+  return { ...seats, ...parts };
+}
+
 describe("uma ação recusada", () => {
   /*
    * O buraco que travou uma mesa de verdade: a recusa saía sozinha, sem estado
@@ -131,21 +146,6 @@ describe("o espelho do descarte e do log", () => {
  * para dizer aos nove que nada tinha mudado no deles.
  */
 describe("a mão privada", () => {
-  function engine(room: UnoRoom) {
-    const inner = room as unknown as { game: UnoGame; sync: () => void };
-    return { game: inner.game, sync: () => inner.sync() };
-  }
-
-  /** A partida começada na marra, sem os dois segundos e meio da roleta. */
-  async function dealt(count: number) {
-    const seats = await seated(count);
-    const parts = engine(seats.room);
-    parts.game.start();
-    parts.sync();
-    await Promise.all(seats.clients.map((c) => c.waitForMessage("hand", 1000)));
-    return { ...seats, ...parts };
-  }
-
   it("cala numa sincronização que não mexeu em mão nenhuma", async () => {
     const { room, clients, sync } = await dealt(3);
 
@@ -176,5 +176,97 @@ describe("a mão privada", () => {
     clients[1].send("resync");
 
     await expect(asked).resolves.toBeDefined();
+  });
+});
+
+/*
+ * A queda que chega como saída. O Colyseus manda para o `onLeave` tanto quem
+ * apertou "sair" quanto quem simplesmente sumiu — e tratar os dois igual
+ * matava a cadeira em segundos, e não nos 90s prometidos: a pessoa minimizava
+ * o navegador, voltava, e a mesa já não a conhecia.
+ */
+describe("uma queda que chega pelo caminho da saída", () => {
+  it("guarda a cadeira em vez de matá-la", async () => {
+    const { room } = await dealt(3);
+    const caindo = room.clients[2];
+
+    // Exatamente o que o framework faz quando o socket morre sem consentimento.
+    await (room as unknown as { onLeave: (c: unknown, code: number) => Promise<void> })
+      .onLeave(caindo, 1001);
+
+    expect([...room.state.players].map((p) => p.name)).toEqual(["P0", "P1", "P2"]);
+    expect(room.state.players[2].connected).toBe(false);
+    expect(room.state.phase).toBe("playing");
+  });
+
+  it("tira a cadeira de quem saiu de propósito", async () => {
+    const { room } = await dealt(3);
+    const saindo = room.clients[2];
+
+    // 4000 = CONSENTED: o botão "voltar ao início", e não uma queda.
+    await (room as unknown as { onLeave: (c: unknown, code: number) => Promise<void> })
+      .onLeave(saindo, 4000);
+
+    expect([...room.state.players].map((p) => p.name)).toEqual(["P0", "P1"]);
+  });
+});
+
+describe("a volta de quem caiu", () => {
+  /** Derruba o socket sem consentimento, que é o que uma queda de verdade faz. */
+  async function drop(client: { connection: { transport: { ws: { close: () => void } } } }) {
+    client.connection.transport.ws.close();
+    await new Promise((done) => setTimeout(done, 600));
+  }
+
+  it("devolve a cadeira e a mão a quem volta com a chave, sem o token", async () => {
+    const room = await colyseus.createRoom<UnoRoom>("uno", { roomName: "Mesa" });
+    const ana = await colyseus.connectTo(room, { playerName: "Ana", seatKey: "chave-ana" });
+    const bruno = await colyseus.connectTo(room, { playerName: "Bruno", seatKey: "chave-bruno" });
+    const { game, sync } = engine(room);
+    game.start();
+    sync();
+    await Promise.all([ana, bruno].map((c) => c.waitForMessage("hand", 1000)));
+    const antes = game.players.find((p) => p.name === "Bruno")!.hand.map((c) => c.id);
+
+    await drop(bruno);
+    expect(room.state.players.length).toBe(2);
+
+    // A aba nova: sem token nenhum, só a chave que o navegador guardou.
+    const devolta = await colyseus.connectTo(room, { playerName: "Bruno", seatKey: "chave-bruno" });
+    const mao = await devolta.waitForMessage("hand", 1000);
+
+    expect(room.state.players.length).toBe(2);
+    expect([...room.state.players].map((p) => p.name)).toEqual(["Ana", "Bruno"]);
+    expect(mao.cards.map((c: { id: string }) => c.id)).toEqual(antes);
+    expect(room.state.players.find((p) => p.name === "Bruno")!.connected).toBe(true);
+  });
+
+  it("não deixa um estranho sentar no meio da partida", async () => {
+    const room = await colyseus.createRoom<UnoRoom>("uno", { roomName: "Mesa" });
+    await colyseus.connectTo(room, { playerName: "Ana", seatKey: "chave-ana" });
+    await colyseus.connectTo(room, { playerName: "Bruno", seatKey: "chave-bruno" });
+    const { game, sync } = engine(room);
+    game.start();
+    sync();
+
+    await expect(
+      colyseus.connectTo(room, { playerName: "Estranho", seatKey: "chave-estranho" }),
+    ).rejects.toThrow(/já começou/);
+    expect(room.state.players.length).toBe(2);
+  });
+
+  it("recusa a chave de quem continua sentado: cadeira não se rouba", async () => {
+    const room = await colyseus.createRoom<UnoRoom>("uno", { roomName: "Mesa" });
+    await colyseus.connectTo(room, { playerName: "Ana", seatKey: "chave-ana" });
+    await colyseus.connectTo(room, { playerName: "Bruno", seatKey: "chave-bruno" });
+    const { game, sync } = engine(room);
+    game.start();
+    sync();
+
+    // Bruno não caiu: a chave dele não abre nada.
+    await expect(
+      colyseus.connectTo(room, { playerName: "Ladrão", seatKey: "chave-bruno" }),
+    ).rejects.toThrow(/em outra aba/);
+    expect(room.state.players.length).toBe(2);
   });
 });

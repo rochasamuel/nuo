@@ -16,7 +16,13 @@ import type {
 } from "@uno/shared";
 import { client } from "../lib/colyseus";
 import { takePendingRoom } from "../lib/pendingRoom";
-import { clearSession, loadPlayerName, loadSession, saveSession } from "../lib/session";
+import {
+  clearSession,
+  loadPlayerName,
+  loadSession,
+  saveSession,
+  seatKeyFor,
+} from "../lib/session";
 
 export type ConnectionStatus = "connecting" | "naming" | "connected" | "lost";
 
@@ -81,15 +87,30 @@ export function useRoomConnection(code: string): RoomConnection {
   const [sessionId, setSessionId] = useState("");
 
   const attach = useCallback(
-    (room: Room, playerName: string) => {
+    (room: Room, playerName: string, seatKey: string) => {
       roomRef.current = room;
       setSessionId(room.sessionId);
       setStatus("connected");
       setDropped(false);
       setError("");
-      saveSession(code, { reconnectionToken: room.reconnectionToken, playerName });
+      let token = room.reconnectionToken;
+      saveSession(code, { reconnectionToken: token, playerName, seatKey });
 
-      room.onStateChange(() => setState(room.state.toJSON() as TableState));
+      room.onStateChange(() => {
+        /*
+         * O token do Colyseus TROCA a cada reconexão, e guardá-lo só no
+         * `onReconnect` deixava uma fresta: a aba que morre entre a troca e a
+         * gravação volta com uma chave morta na mão. Aqui ele é conferido a
+         * cada patch — uma comparação de string, e a escrita só quando de fato
+         * mudou. A `seatKey` cobre o resto, mas uma fresta a menos é uma volta
+         * a mais que acontece pelo caminho curto.
+         */
+        if (room.reconnectionToken !== token) {
+          token = room.reconnectionToken;
+          saveSession(code, { reconnectionToken: token, playerName, seatKey });
+        }
+        setState(room.state.toJSON() as TableState);
+      });
       room.onMessage("hand", (message: HandMessage) => setHand(message));
       room.onMessage("error", (message: ErrorMessage) => setNotice(message.message));
       room.onMessage("fx", (events: FxMessage) => {
@@ -101,7 +122,8 @@ export function useRoomConnection(code: string): RoomConnection {
       room.onDrop(() => setDropped(true));
       room.onReconnect(() => {
         setDropped(false);
-        saveSession(code, { reconnectionToken: room.reconnectionToken, playerName });
+        token = room.reconnectionToken;
+        saveSession(code, { reconnectionToken: token, playerName, seatKey });
       });
       room.onLeave(() => {
         roomRef.current = null;
@@ -116,10 +138,14 @@ export function useRoomConnection(code: string): RoomConnection {
     async (playerName: string) => {
       setStatus("connecting");
       setError("");
+      const seatKey = seatKeyFor(code);
       try {
-        const room = await client.joinById(code, { playerName } satisfies JoinRoomOptions);
+        const room = await client.joinById(code, {
+          playerName,
+          seatKey,
+        } satisfies JoinRoomOptions);
         if (!alive.current) return void room.leave();
-        attach(room, playerName);
+        attach(room, playerName, seatKey);
       } catch (cause) {
         // Sem `clearSession`: uma entrada nova que falhou não diz nada sobre um
         // lugar guardado de antes, e apagar o token aqui fecharia a única porta
@@ -145,7 +171,10 @@ export function useRoomConnection(code: string): RoomConnection {
 
     try {
       const handedOver = takePendingRoom(code);
-      if (handedOver) return attach(handedOver, saved?.playerName ?? loadPlayerName());
+      const seatKey = seatKeyFor(code);
+      if (handedOver) {
+        return attach(handedOver, saved?.playerName ?? loadPlayerName(), seatKey);
+      }
 
       const name = saved?.playerName || loadPlayerName();
       // Sem token e sem nome não há o que tentar: quem chega assim vem do link
@@ -158,19 +187,22 @@ export function useRoomConnection(code: string): RoomConnection {
       if (saved?.reconnectionToken) {
         const room = await reclaimSeat(saved.reconnectionToken, () => alive.current);
         if (!alive.current) return void room?.leave();
-        if (room) return attach(room, saved.playerName);
+        if (room) return attach(room, saved.playerName, seatKey);
         // O token NÃO é descartado aqui. Falhar em reclamar o lugar não prova
-        // que ele acabou — prova que não deu desta vez —, e é o token a única
-        // porta que existe: a sala fica trancada enquanto a partida corre, e
-        // sem ele o "tentar novamente" bate numa porta que nunca abre.
+        // que ele acabou — prova que não deu desta vez. E não é mais a única
+        // porta: a entrada logo abaixo leva a `seatKey`, que o servidor
+        // reconhece enquanto a cadeira estiver guardada.
       }
 
       if (!name) return setStatus("naming");
 
       try {
-        const room = await client.joinById(code, { playerName: name } satisfies JoinRoomOptions);
+        const room = await client.joinById(code, {
+          playerName: name,
+          seatKey,
+        } satisfies JoinRoomOptions);
         if (!alive.current) return void room.leave();
-        attach(room, name);
+        attach(room, name, seatKey);
       } catch (cause) {
         if (!alive.current) return;
         setError(joinError(cause));

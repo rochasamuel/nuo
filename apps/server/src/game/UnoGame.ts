@@ -21,7 +21,10 @@ import { canPlay, canStack } from "./rules.js";
 export class GameError extends Error {}
 
 export type GamePlayer = {
+  /** A sessão de agora. Muda quando ele cai e volta por outra conexão. */
   id: string;
+  /** Quem ele é, entre uma conexão e outra. Ver `seatKey` no `@uno/shared`. */
+  key: string;
   name: string;
   hand: Card[];
   calledUno: boolean;
@@ -112,11 +115,39 @@ export class UnoGame {
     return this.vulnerable.length > 0 && this.now() - this.vulnerableSince >= UNO_GRACE;
   }
 
-  addPlayer(id: string, name: string) {
+  addPlayer(id: string, key: string, name: string) {
     if (this.phase !== "lobby") throw new GameError("A partida já começou.");
     if (this.players.some((p) => p.id === id)) return;
-    this.players.push({ id, name, hand: [], calledUno: false });
+    this.players.push({ id, key, name, hand: [], calledUno: false });
     this.pushLog(`${name} entrou na sala.`);
+  }
+
+  /** A cadeira de quem tem esta chave, se houver uma. */
+  seatOf(key: string): GamePlayer | undefined {
+    return key ? this.players.find((player) => player.key === key) : undefined;
+  }
+
+  /**
+   * Devolve uma cadeira a quem voltou por outra conexão.
+   *
+   * A mão, a vez, o UNO por gritar e o 7 por escolher continuam de pé: o que
+   * muda é só por qual socket a mesa fala com ele. Quem decide se a cadeira
+   * está livre para ser reclamada é a sala, que é quem sabe quem está
+   * conectado.
+   *
+   * Todo lugar que guarda um `id` tem de ser acompanhado aqui. Um esquecido não
+   * dá erro nenhum: dá uma mesa esperando para sempre um tapa de alguém que não
+   * existe mais, ou uma imunidade que nunca vence.
+   */
+  reseat(player: GamePlayer, id: string) {
+    const previous = player.id;
+    player.id = id;
+    if (previous === id) return;
+    this.slapPending = this.slapPending.map((who) => (who === previous ? id : who));
+    this.vulnerable = this.vulnerable.map((who) => (who === previous ? id : who));
+    if (this.swapChooserId === previous) this.swapChooserId = id;
+    if (this.winnerId === previous) this.winnerId = id;
+    this.pushLog(`${player.name} voltou para a mesa.`);
   }
 
   removePlayer(id: string) {

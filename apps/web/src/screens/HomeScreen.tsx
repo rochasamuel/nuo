@@ -11,7 +11,7 @@ import { BACK_URL } from "../lib/cards";
 import { ROOM_NAME, client } from "../lib/colyseus";
 import { setPendingRoom } from "../lib/pendingRoom";
 import { navigate } from "../lib/router";
-import { loadSetup, saveSession, saveSetup } from "../lib/session";
+import { loadSetup, newSeatKey, saveSession, saveSetup } from "../lib/session";
 import { useUi } from "../store/ui";
 
 export function HomeScreen() {
@@ -31,6 +31,9 @@ export function HomeScreen() {
       saveSession(room.roomId, {
         reconnectionToken: room.reconnectionToken,
         playerName: options.playerName,
+        // A mesma chave que foi na criação: é ela que devolve a cadeira ao host
+        // se ele cair antes de a partida acabar.
+        seatKey: options.seatKey,
       });
       // Depois de a sala existir, e não no envio: o que se guarda é um
       // combinado que deu certo, não uma tentativa.
@@ -60,7 +63,7 @@ export function HomeScreen() {
         className="px-slab flex flex-col gap-4 p-5"
         onSubmit={(event) => {
           event.preventDefault();
-          createRoom.mutate({ roomName, playerName, maxPlayers, rules });
+          createRoom.mutate({ roomName, playerName, maxPlayers, rules, seatKey: newSeatKey() });
         }}
       >
         <h1 className="px-title">Abrir uma mesa</h1>

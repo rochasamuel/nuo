@@ -37,7 +37,7 @@ function play(seed: number, rules: Partial<HouseRules>, players: number): Fault 
   const random = seeded(seed);
   const game = new UnoGame(random);
   game.rules = { ...game.rules, ...rules };
-  for (let i = 0; i < players; i++) game.addPlayer(`p${i}`, `P${i}`);
+  for (let i = 0; i < players; i++) game.addPlayer(`p${i}`, `k${i}`, `P${i}`);
   game.start();
 
   const label = { seed, players, rules: JSON.stringify(rules) };
