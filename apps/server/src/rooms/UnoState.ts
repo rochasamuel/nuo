@@ -43,6 +43,8 @@ export class PlayerState extends Schema {
   @type("uint8") cardCount = 0;
   @type("boolean") connected = true;
   @type("boolean") calledUno = false;
+  /** Segundos de cadeira guardada que restam a quem caiu. Ver `UnoRoom.hold`. */
+  @type("uint16") away = 0;
 }
 
 export class UnoRoomState extends Schema {

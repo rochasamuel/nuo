@@ -102,6 +102,17 @@ export function PlayerSeat({
         </span>
       </span>
 
+      {/*
+        Caiu, e a mesa está guardando o lugar dele. O relógio é o que separa
+        "o Fulano travou a mesa" de "a mesa espera o Fulano por mais um minuto":
+        quem espera precisa saber até quando.
+      */}
+      {!player.connected && player.away > 0 && (
+        <span className="px-label" role="status" title="tempo para voltar à mesa">
+          caiu · esperando {clock(player.away)}
+        </span>
+      )}
+
       {player.calledUno && cardCount === 1 && (
         <span className="px-label" style={{ color: "var(--mark)" }}>
           UNO!
@@ -159,4 +170,9 @@ export function PlayerSeat({
       )}
     </div>
   );
+}
+
+/** 90 → "1:30". */
+function clock(seconds: number) {
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
 }

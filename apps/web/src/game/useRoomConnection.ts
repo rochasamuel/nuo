@@ -14,6 +14,7 @@ import type {
   SwapMessage,
   TableState,
 } from "@uno/shared";
+import { RECONNECT_TIMEOUT } from "@uno/shared";
 import { client } from "../lib/colyseus";
 import { takePendingRoom } from "../lib/pendingRoom";
 import {
@@ -266,6 +267,25 @@ export function useRoomConnection(code: string): RoomConnection {
     return () => clearTimeout(timer);
   }, [notice]);
 
+  /*
+   * O SDK desiste depois de algumas tentativas pelo token — e o token pode
+   * não servir mais mesmo com a cadeira guardada (ver `hold` no servidor). A
+   * chave ainda serve, e voltar por ela é o `connect`. Tentar sozinho de tempos
+   * em tempos é o que devolve a mesa a quem caiu sem pedir que ele ache o
+   * botão — mas só enquanto a cadeira pode estar esperando.
+   */
+  const autoRetries = useRef(0);
+  useEffect(() => {
+    if (status === "connected") autoRetries.current = 0;
+    if (status !== "lost") return;
+    const timer = setInterval(() => {
+      if (autoRetries.current * AUTO_RETRY_MS > RECONNECT_TIMEOUT * 1000) return;
+      autoRetries.current++;
+      void connect();
+    }, AUTO_RETRY_MS);
+    return () => clearInterval(timer);
+  }, [connect, status]);
+
   const retry = useCallback(() => void connect(), [connect]);
 
   const leave = useCallback(() => {
@@ -333,6 +353,9 @@ export function useRoomConnection(code: string): RoomConnection {
  * ninguém esperar por um assento que de fato acabou.
  */
 const RECLAIM_BACKOFF = [0, 400, 1200];
+
+/** De quanto em quanto tempo a tela "fora da partida" tenta voltar sozinha. */
+const AUTO_RETRY_MS = 5000;
 
 async function reclaimSeat(token: string, alive: () => boolean): Promise<Room | null> {
   for (const wait of RECLAIM_BACKOFF) {

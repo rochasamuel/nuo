@@ -106,6 +106,8 @@ export function MockScreen() {
       name: NAMES[i % NAMES.length],
       cardCount: i === 0 ? hand.length : [7, 1, 12, 3, 25, 2, 9, 4, 6, 1][i % 10],
       connected: i !== 3,
+      // O desconectado está com a cadeira guardada: é assim que o timer aparece.
+      away: i === 3 ? 74 : 0,
       // Só quem tem 1 carta mostra o estado. p1 esqueceu de gritar (fica
       // pegável); p9 gritou (fica seguro). São os dois únicos com 1 carta.
       calledUno: i === 9,

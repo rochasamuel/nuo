@@ -253,6 +253,11 @@ export type PublicPlayer = {
   cardCount: number;
   connected: boolean;
   calledUno: boolean;
+  /**
+   * Segundos que ainda restam da cadeira guardada de quem caiu. `0` é quem
+   * está conectado — ou quem a mesa já não espera mais.
+   */
+  away: number;
 };
 
 export type TableState = {
