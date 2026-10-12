@@ -97,13 +97,8 @@ export function loadSetup(): StoredSetup {
     rules: { ...DEFAULT_RULES },
   };
 
-  let stored: Partial<StoredSetup>;
-  try {
-    stored = JSON.parse(localStorage.getItem(SETUP_KEY) ?? "") as Partial<StoredSetup>;
-  } catch {
-    return fallback;
-  }
-  if (!stored || typeof stored !== "object") return fallback;
+  const stored = readObject<StoredSetup>(SETUP_KEY);
+  if (!stored) return fallback;
 
   const seats = Number(stored.maxPlayers);
   return {
@@ -139,16 +134,25 @@ export function savePrefs(prefs: StoredPrefs) {
 export function loadPrefs(): StoredPrefs {
   const fallback: StoredPrefs = { seatLayout: "row", lowMotion: false };
 
-  let stored: Partial<StoredPrefs>;
-  try {
-    stored = JSON.parse(localStorage.getItem(PREFS_KEY) ?? "") as Partial<StoredPrefs>;
-  } catch {
-    return fallback;
-  }
-  if (!stored || typeof stored !== "object") return fallback;
+  const stored = readObject<StoredPrefs>(PREFS_KEY);
+  if (!stored) return fallback;
 
   return {
     seatLayout: stored.seatLayout === "ring" ? "ring" : "row",
     lowMotion: stored.lowMotion === true,
   };
+}
+
+/**
+ * O objeto guardado nesta chave, ou `null` quando não há um que se leia: chave
+ * vazia, JSON quebrado ou um valor que não é objeto. Quem chama confere campo
+ * a campo — aqui só se garante que há campos para conferir.
+ */
+function readObject<T>(key: string): Partial<T> | null {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(key) ?? "");
+    return value && typeof value === "object" ? (value as Partial<T>) : null;
+  } catch {
+    return null;
+  }
 }

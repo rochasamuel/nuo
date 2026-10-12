@@ -23,12 +23,9 @@ import {
   type PlayMessage,
   type SwapMessage,
 } from "@uno/shared";
-import type { ArraySchema } from "@colyseus/schema";
 import { GameError, UnoGame, type GamePlayer } from "../game/UnoGame.js";
-import { CardState, PlayerState, UnoRoomState } from "./UnoState.js";
-
-/** Cards of the discard pile the clients keep, so the table can render a messy stack. */
-const VISIBLE_DISCARD = 8;
+import { UnoMirror, type SeatStatus } from "./UnoMirror.js";
+import { UnoRoomState } from "./UnoState.js";
 
 const ROOM_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 const ROOM_CODE_LENGTH = 5;
@@ -54,8 +51,8 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
   private lastEmote = new Map<string, number>();
   /** A última mão que cada cliente recebeu, para não reenviar a mesma. */
   private sentHands = new Map<string, string>();
-  /** Até que linha do log a mesa já foi espelhada. Ver `syncLog`. */
-  private sentLogSeq = 0;
+  /** Quem copia o motor para o estado sincronizado. Ver `UnoMirror`. */
+  private mirror = new UnoMirror();
   /**
    * Cadeiras guardadas agora, à espera de quem caiu, e quando cada uma morre.
    *
@@ -66,6 +63,15 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
   private holds = new Map<GamePlayer, { until: number; timer: Delayed }>();
   /** O relógio que faz o timer de quem caiu andar na tela dos outros. */
   private awayTicker?: Delayed;
+
+  /** O que o espelho precisa saber das cadeiras e que só a sala sabe. */
+  private seats: SeatStatus = {
+    connected: (id) => this.connected.has(id),
+    away: (player) => {
+      const held = this.holds.get(player);
+      return held ? Math.max(0, Math.ceil((held.until - this.clock.currentTime) / 1000)) : 0;
+    },
+  };
 
   messages = {
     start: (client: Client) => this.act(client, () => this.draft(client)),
@@ -205,10 +211,8 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
     // achar cadeira nenhuma com aquele id — que é o certo. O que sai daqui é só
     // a marca, para ela não sobrar em memória pelo resto da partida.
     this.unhold(seat);
-    this.connected.delete(previous);
+    this.forget(previous);
     this.connected.add(client.sessionId);
-    this.sentHands.delete(previous);
-    this.lastEmote.delete(previous);
     if (this.state.hostId === previous) this.state.hostId = client.sessionId;
     if (this.state.starterId === previous) this.state.starterId = client.sessionId;
   }
@@ -276,7 +280,7 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
 
   /** A cadeira desta conexão, se ela ainda tiver uma. */
   private seatOf(client: Client) {
-    return this.game.players.find((player) => player.id === client.sessionId);
+    return this.game.player(client.sessionId);
   }
 
   /**
@@ -349,7 +353,10 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
    */
   private tickAway() {
     if (this.awayTicker) return;
-    this.awayTicker = this.clock.setInterval(() => this.syncPlayers(), 1000);
+    this.awayTicker = this.clock.setInterval(
+      () => this.mirror.writePlayers(this.state, this.game, this.seats),
+      1000,
+    );
   }
 
   /** Tira a cadeira da mesa. Idempotente: o prazo e o framework podem chegar juntos. */
@@ -358,15 +365,20 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
   }
 
   private removeSeat(id: string) {
-    this.unhold(this.game.players.find((player) => player.id === id));
-    this.connected.delete(id);
-    this.lastEmote.delete(id);
-    this.sentHands.delete(id);
+    this.unhold(this.game.player(id));
+    this.forget(id);
     this.game.removePlayer(id);
     if (this.state.hostId === id) {
       this.state.hostId = this.game.players[0]?.id ?? "";
     }
     this.sync();
+  }
+
+  /** Esquece o que a sala guardava sobre esta sessão. */
+  private forget(sessionId: string) {
+    this.connected.delete(sessionId);
+    this.sentHands.delete(sessionId);
+    this.lastEmote.delete(sessionId);
   }
 
   /** Runs a game action, reporting rejections to the caller instead of crashing the room. */
@@ -435,7 +447,7 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
         pendingDraw: this.game.pendingDraw,
         drawnCardId: this.game.drawnCardId,
         playable: this.game.playableCards(client.sessionId).map((c) => c.id),
-        hand: this.game.players.find((p) => p.id === client.sessionId)?.hand.length,
+        hand: this.game.player(client.sessionId)?.hand.length,
         slapPending: this.game.slapPending.length,
         swapChooserId: this.game.swapChooserId,
         rules: this.game.rules,
@@ -482,26 +494,7 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
 
   /** Mirrors the public half of the game into the synchronized state, then hands out the private half. */
   private sync() {
-    const { game, state } = this;
-
-    state.phase = game.phase;
-    state.currentPlayerId = game.phase === "playing" ? (game.currentPlayer?.id ?? "") : "";
-    state.currentColor = game.currentColor;
-    state.direction = game.direction;
-    state.pendingDraw = game.pendingDraw;
-    state.deckCount = game.deck.length;
-    state.winnerId = game.winnerId;
-    syncList(state.vulnerablePlayerIds, game.vulnerable);
-    state.catchOpen = game.catchOpen;
-    state.mustPlayDrawn = game.drawnCardId !== null;
-    state.swapChooserId = game.swapChooserId;
-
-    syncList(state.slapPending, game.slapPending);
-
-    this.syncPlayers();
-
-    this.syncDiscard();
-    this.syncLog();
+    this.mirror.write(this.state, this.game, this.seats);
 
     this.armCatchWindow();
     this.armSlapWindow();
@@ -571,103 +564,6 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
     }, SWAP_TIMEOUT);
   }
 
-  /**
-   * A ponta visível do descarte, escrita pelo fim.
-   *
-   * O caso comum é uma carta a mais no topo. Reescrever as oito para anunciar
-   * uma custava oito objetos de esquema novos e um patch que apagava e
-   * recriava a lista inteira — a cada jogada, para a mesa toda. Aqui entra o
-   * que entrou e sai da frente o que saiu da janela.
-   *
-   * O que não cresce por uma carta não é jogada: é o reembaralhar, ou uma
-   * partida nova. Aí não há trecho comum a aproveitar e a lista se reescreve,
-   * que é o que ela sempre fez.
-   */
-  private syncDiscard() {
-    const { discard } = this.game;
-    const grew = discard.length - this.state.discardCount;
-    /*
-     * Mesma altura E mesmo topo é a mesma pilha. Só a altura não bastava:
-     * uma revanche logo depois de um reembaralhar começa com uma carta, que é
-     * exatamente quantas o reembaralhar deixou — e a mesa continuava mostrando
-     * a carta da partida anterior, porque o número não tinha mexido.
-     */
-    if (grew === 0 && this.state.discard.at(-1)?.id === discard.at(-1)?.id) return;
-
-    this.state.discardCount = discard.length;
-    const visible = Math.min(VISIBLE_DISCARD, discard.length);
-
-    if (grew > 0 && grew < visible) {
-      for (const card of discard.slice(-grew)) {
-        this.state.discard.push(CardState.from(card));
-      }
-      while (this.state.discard.length > visible) this.state.discard.shift();
-      return;
-    }
-
-    this.state.discard.splice(0);
-    for (const card of discard.slice(-visible)) {
-      this.state.discard.push(CardState.from(card));
-    }
-  }
-
-  /**
-   * O log, pelo mesmo motivo e do mesmo jeito: ele é uma janela que anda, e
-   * anunciar uma linha nova reescrevendo as doze mandava doze operações no
-   * patch para dizer uma. `logSeq` é o que diz quantas são novas — sem ele não
-   * dava para saber, porque duas linhas podem ter o mesmo texto.
-   *
-   * Uma partida nova zera o contador, e aí a janela inteira é outra.
-   */
-  private syncLog() {
-    const { log, logSeq } = this.game;
-    const fresh = logSeq - this.sentLogSeq;
-    this.sentLogSeq = logSeq;
-
-    // Pelo mesmo cuidado do descarte: o contador zerado de uma partida nova
-    // pode cair exatamente onde o da anterior parou.
-    const mirrored = this.state.log;
-    if (fresh === 0 && mirrored.length === log.length && mirrored.at(-1) === log.at(-1)) {
-      return;
-    }
-    if (fresh > 0 && fresh < log.length) {
-      const dropped = mirrored.length + fresh - log.length;
-      for (let i = 0; i < dropped; i++) mirrored.shift();
-      for (const message of log.slice(-fresh)) mirrored.push(message);
-      return;
-    }
-
-    mirrored.splice(0);
-    mirrored.push(...log);
-  }
-
-  private syncPlayers() {
-    const rosterChanged =
-      this.state.players.length !== this.game.players.length ||
-      this.game.players.some((player, i) => this.state.players[i]?.id !== player.id);
-
-    if (rosterChanged) {
-      this.state.players.splice(0);
-      for (const player of this.game.players) {
-        const entry = new PlayerState();
-        entry.id = player.id;
-        entry.name = player.name;
-        this.state.players.push(entry);
-      }
-    }
-
-    this.game.players.forEach((player, i) => {
-      const entry = this.state.players[i];
-      entry.cardCount = player.hand.length;
-      entry.calledUno = player.calledUno;
-      entry.connected = this.connected.has(player.id);
-      const held = this.holds.get(player);
-      entry.away = held
-        ? Math.max(0, Math.ceil((held.until - this.clock.currentTime) / 1000))
-        : 0;
-    });
-  }
-
   private sendHands() {
     for (const client of this.clients) this.sendHandTo(client);
   }
@@ -685,7 +581,7 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
    * chegar, ou quem pediu a mesa de novo depois de o socket sumir.
    */
   private sendHandTo(client: Client, force = false) {
-    const player = this.game.players.find((p) => p.id === client.sessionId);
+    const player = this.game.player(client.sessionId);
     if (!player) return;
 
     const playableIds = this.game.playableCards(player.id).map((c) => c.id);
@@ -715,17 +611,6 @@ export class UnoRoom extends Room<{ state: UnoRoomState }> {
       return id;
     }
   }
-}
-
-/**
- * Espelha uma lista de ids no estado sincronizado, e só quando ela de fato
- * mudou: reescrevê-la a cada `sync` mandaria um patch para a mesa inteira a
- * cada jogada, para dizer que nada mudou.
- */
-function syncList(target: ArraySchema<string>, source: string[]) {
-  if (target.length === source.length && source.every((id, i) => target[i] === id)) return;
-  target.splice(0);
-  target.push(...source);
 }
 
 function sanitize(value: unknown, fallback: string, maxLength: number): string {

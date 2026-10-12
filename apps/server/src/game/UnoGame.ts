@@ -122,6 +122,11 @@ export class UnoGame {
     this.pushLog(`${name} entrou na sala.`);
   }
 
+  /** O jogador desta sessão, se ele ainda estiver na mesa. */
+  player(id: string): GamePlayer | undefined {
+    return this.players.find((player) => player.id === id);
+  }
+
   /** A cadeira de quem tem esta chave, se houver uma. */
   seatOf(key: string): GamePlayer | undefined {
     return key ? this.players.find((player) => player.key === key) : undefined;
@@ -155,7 +160,7 @@ export class UnoGame {
     if (index === -1) return;
     const [gone] = this.players.splice(index, 1);
     this.deck.unshift(...gone.hand);
-    this.vulnerable = this.vulnerable.filter((exposed) => exposed !== id);
+    this.unexpose(id);
     this.pushLog(`${gone.name} saiu.`);
 
     /*
@@ -339,8 +344,8 @@ export class UnoGame {
     if (this.swapChooserId === "") throw new GameError("Não há troca em jogo.");
     if (this.swapChooserId !== chooserId) throw new GameError("A troca não é sua.");
     if (chooserId === targetId) throw new GameError("Escolha outro jogador.");
-    const chooser = this.players.find((p) => p.id === chooserId)!;
-    const target = this.players.find((p) => p.id === targetId);
+    const chooser = this.player(chooserId)!;
+    const target = this.player(targetId);
     if (!target) throw new GameError("Esse jogador não está na mesa.");
 
     this.swapChooserId = "";
@@ -358,13 +363,12 @@ export class UnoGame {
    */
   timeoutSwap() {
     if (this.swapChooserId === "") return;
-    const chooser = this.players.find((p) => p.id === this.swapChooserId);
+    const chooser = this.player(this.swapChooserId);
     this.swapChooserId = "";
     if (!chooser) return;
 
-    const n = this.players.length;
     const from = this.players.indexOf(chooser);
-    const next = this.players[(((from + this.direction) % n) + n) % n];
+    const next = this.players[this.wrap(from + this.direction)];
     if (next && next !== chooser) {
       this.pushLog(`${chooser.name} não escolheu a tempo: a troca vai para o vizinho.`);
       this.swapHands(chooser, next);
@@ -383,10 +387,7 @@ export class UnoGame {
 
     if (this.pendingDraw > 0) {
       this.vulnerable = [];
-      const taken = this.take(this.pendingDraw);
-      player.hand.push(...taken);
-      if (taken.length > 0) this.fx.push({ k: "draw", to: player.id, n: taken.length });
-      player.calledUno = false;
+      const taken = this.drawInto(player, this.pendingDraw);
       this.pushLog(`${player.name} comprou ${taken.length} e perdeu a vez.`);
       this.pendingDraw = 0;
       this.endTurn();
@@ -458,14 +459,14 @@ export class UnoGame {
    */
   callUno(playerId: string) {
     if (this.phase !== "playing") throw new GameError("A partida não está em andamento.");
-    const player = this.players.find((p) => p.id === playerId);
+    const player = this.player(playerId);
     if (!player) throw new GameError("Você não está nesta partida.");
     if (player.calledUno) throw new GameError("Você já gritou UNO.");
     if (player.hand.length !== 1) {
       throw new GameError("Grite UNO assim que ficar com uma carta.");
     }
     player.calledUno = true;
-    this.vulnerable = this.vulnerable.filter((exposed) => exposed !== playerId);
+    this.unexpose(playerId);
     this.pushLog(`${player.name} gritou UNO!`);
   }
 
@@ -481,20 +482,17 @@ export class UnoGame {
     if (!this.catchOpen) {
       throw new GameError("Espere: ele ainda pode gritar UNO.");
     }
-    const target = this.players.find((p) => p.id === targetId)!;
-    const taken = this.take(UNO_PENALTY);
-    target.hand.push(...taken);
-    if (taken.length > 0) this.fx.push({ k: "draw", to: target.id, n: taken.length });
-    target.calledUno = false;
+    const target = this.player(targetId)!;
+    this.drawInto(target, UNO_PENALTY);
     // Só ele sai da linha de tiro. Depois de uma roda no 0 pode haver mais de
     // um exposto, e pegar um não é o que absolve os outros.
-    this.vulnerable = this.vulnerable.filter((exposed) => exposed !== targetId);
+    this.unexpose(targetId);
     this.pushLog(`${target.name} esqueceu o UNO e comprou ${UNO_PENALTY}.`);
   }
 
   /** What this player is allowed to play right now. The client renders it; it never decides it. */
   playableCards(playerId: string): Card[] {
-    const player = this.players.find((p) => p.id === playerId);
+    const player = this.player(playerId);
     if (!player) return [];
     if (this.phase !== "playing") return [];
     // Mesa congelada pelo tapa: nada é jogável, nem para quem tem a vez. Sem
@@ -613,7 +611,7 @@ export class UnoGame {
    */
   private punishSlappers(ids: string[], why: "slowest" | "late") {
     for (const id of ids) {
-      const player = this.players.find((p) => p.id === id);
+      const player = this.player(id);
       if (!player) continue;
       const taken = this.take(1);
       if (taken.length === 0) {
@@ -625,7 +623,7 @@ export class UnoGame {
       // Comprar tira quem estava com uma carta só da linha de tiro, exatamente
       // como em qualquer outra compra.
       player.calledUno = false;
-      this.vulnerable = this.vulnerable.filter((exposed) => exposed !== player.id);
+      this.unexpose(player.id);
       this.pushLog(
         why === "slowest"
           ? `${player.name} bateu por último e comprou uma carta.`
@@ -702,7 +700,7 @@ export class UnoGame {
     // desta fila, e o último ao primeiro. É a mesma fila que a mesa anima.
     const order = Array.from(
       { length: n },
-      (_, step) => this.players[(((this.currentIndex + this.direction * step) % n) + n) % n],
+      (_, step) => this.players[this.wrap(this.currentIndex + this.direction * step)],
     );
     const hands = order.map((player) => player.hand);
     order.forEach((player, i) => {
@@ -725,7 +723,7 @@ export class UnoGame {
   private reexpose(changed: GamePlayer[]) {
     for (const player of changed) {
       player.calledUno = false;
-      this.vulnerable = this.vulnerable.filter((exposed) => exposed !== player.id);
+      this.unexpose(player.id);
       if (player.hand.length === 1) this.vulnerable.push(player.id);
     }
     // A carência conta da mão que acabou de chegar, e não da jogada que a
@@ -778,9 +776,31 @@ export class UnoGame {
   }
 
   private advance(steps = 1) {
+    if (this.players.length === 0) return;
+    this.currentIndex = this.wrap(this.currentIndex + this.direction * steps);
+  }
+
+  /** Um índice qualquer trazido de volta para dentro da roda, nos dois sentidos. */
+  private wrap(index: number): number {
     const n = this.players.length;
-    if (n === 0) return;
-    this.currentIndex = (((this.currentIndex + this.direction * steps) % n) + n) % n;
+    return ((index % n) + n) % n;
+  }
+
+  /**
+   * Uma compra que não se escolhe — a pilha do +2/+4, a multa do UNO. As cartas
+   * entram na mão, a mesa vê o voo, e o grito de UNO deixa de valer.
+   */
+  private drawInto(player: GamePlayer, count: number): Card[] {
+    const taken = this.take(count);
+    player.hand.push(...taken);
+    if (taken.length > 0) this.fx.push({ k: "draw", to: player.id, n: taken.length });
+    player.calledUno = false;
+    return taken;
+  }
+
+  /** Tira alguém da linha de tiro do "Pegar". */
+  private unexpose(id: string) {
+    this.vulnerable = this.vulnerable.filter((exposed) => exposed !== id);
   }
 
   private take(count: number): Card[] {
